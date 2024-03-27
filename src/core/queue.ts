@@ -7,7 +7,7 @@ import fs from 'fs';
 const internalQueue = fastq(converter, CONCURRENCY)
 
 class Queue {
-    db = betterSqlite3('queue.sqlite', { verbose: console.log });
+    db = betterSqlite3('db/queue.sqlite', { verbose: console.log });
 
     constructor() {
         this.db.exec(`CREATE TABLE IF NOT EXISTS process_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, source TEXT)`);

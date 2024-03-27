@@ -6,6 +6,7 @@ COPY ./src ./src
 COPY ./package.json ./
 COPY ./pnpm-lock.yaml ./
 COPY ./tsconfig.json ./
+COPY ./start.sh ./
 
 RUN npm install -g pnpm
 
@@ -19,4 +20,6 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
-CMD ["pnpm", "run", "start"]
+RUN chmod +x ./start.sh
+
+CMD ["./start.sh"]

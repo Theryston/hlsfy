@@ -1,4 +1,4 @@
 node_modules
-queue.sqlite
+db
 dist
 tmp
