@@ -24,7 +24,7 @@ do any extra configuration
 
 ## IMPORTANT: API Auto Stop
 
-By default, every 5 minutes an internal process will run and check if there is a
+By default, every minute an internal process will run and check if there is a
 video in process or that needs to be processed, if not, it will AUTOMATICALLY
 STOP RUNNING (it will be output with status 0).
 
