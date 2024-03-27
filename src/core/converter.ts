@@ -48,14 +48,28 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
     let sourcePath = path.join(tempDir, 'source');
 
     const result = await downloadFile(source, sourcePath);
+
+    if (!result) {
+        throw new Error('download failed');
+    }
+
     const extension = (await getFileType(sourcePath)).ext;
     const oldSourcePath = sourcePath;
     sourcePath = `${sourcePath}.${extension}`;
     fs.renameSync(oldSourcePath, sourcePath);
 
-    if (!result) {
-        throw new Error('download failed');
+    const sourceInfo = await getVideoInfos(sourcePath);
+    let stream = sourceInfo.streams.find(stream => stream.codec_type === 'video' && stream.height);
+
+    if (!stream) {
+        stream = sourceInfo.streams.find(stream => stream.codec_type === 'video');
     }
+
+    if (!stream) {
+        throw new Error('stream not found');
+    }
+
+    qualities = qualities.filter(quality => stream?.height ? quality.height <= stream.height : true);
 
     const hlsFolder = path.join(tempDir, 'hls');
 
@@ -89,18 +103,22 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
     console.log(`[CONVERTER] ${source} completed`);
 }
 
+async function getVideoInfos(videoPath: string) {
+    return new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
+        ffmpeg.ffprobe(videoPath, (err, data) => {
+            if (err) {
+                reject(err);
+            }
+            resolve(data);
+        });
+    })
+}
+
 async function buildPlaylist(qualitiesM3u8: { path: string, height: number, bitrate: number }[], playlistPath: string, hlsFolder: string) {
     let content = '#EXTM3U\n';
 
     for (const quality of qualitiesM3u8) {
-        const videoInfos = await new Promise<ffmpeg.FfprobeData>((resolve, reject) => {
-            ffmpeg.ffprobe(quality.path, (err, data) => {
-                if (err) {
-                    reject(err);
-                }
-                resolve(data);
-            });
-        })
+        const videoInfos = await getVideoInfos(quality.path);
         const videoStream = videoInfos.streams[0];
         const relative = path.relative(hlsFolder, quality.path);
 
