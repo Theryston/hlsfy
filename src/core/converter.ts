@@ -28,9 +28,14 @@ export type ConverterParams = {
     source: string
     qualities: Quality[]
     s3: S3
+    onStart?: () => void
 }
 
-export async function converter({ source, qualities, s3 }: ConverterParams) {
+export async function converter({ source, qualities, s3, onStart }: ConverterParams) {
+    if (onStart) {
+        onStart();
+    }
+
     const id = Math.random().toString(36).slice(2);
     const tempDir = path.join(TEMP_DIR, id);
 

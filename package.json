@@ -1,5 +1,6 @@
 {
   "name": "hlsfy",
+  "description": "This is an extremely simple open source API with a single objective: transforming any video format into HLS",
   "version": "1.0.0",
   "type": "module",
   "exports": "./dist/index.js",

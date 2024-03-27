@@ -80,8 +80,20 @@ app.post('/', async (req, res) => {
         return;
     }
 
-    const id = queue.push(params);
-    res.status(200).json({ message: 'Added to queue', id });
+    const process: any = queue.push(params);
+    res.status(200).json({ message: 'Added to queue', ...process });
+})
+
+app.get('/', async (req, res) => {
+    const limit = Number(req.query.limit || '100');
+    const result = queue.listProcess(limit);
+
+    if (!result) {
+        res.status(404).json({ error: 'No process found' });
+        return;
+    }
+
+    res.status(200).json(result);
 })
 
 app.get('/:id', async (req, res) => {
