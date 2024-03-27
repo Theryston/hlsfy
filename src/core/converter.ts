@@ -1,4 +1,4 @@
-import { TEMP_DIR } from "../constants.js"
+import { CONCURRENCY, TEMP_DIR } from "../constants.js"
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
@@ -6,6 +6,7 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ffmpeg from 'fluent-ffmpeg';
 import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
 import { path as ffprobePath } from 'ffprobe-static';
+import { promise as fastq } from "fastq";
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -73,8 +74,9 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
 
     const hlsFolder = path.join(tempDir, 'hls');
 
-    const qualitiesM3u8 = [];
-    for (let i = 0; i < qualities.length; i++) {
+    const qualitiesM3u8: { path: string, height: number, bitrate: number }[] = [];
+
+    const queueConvert = fastq(async (i) => {
         const quality = qualities[i];
         const targetPath = path.join(hlsFolder, `quality-${i + 1}`);
         const result = await hlsConvert(sourcePath, targetPath, quality);
@@ -88,7 +90,13 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
             height: quality.height,
             bitrate: quality.bitrate
         })
+    }, CONCURRENCY);
+
+    for (let i = 0; i < qualities.length; i++) {
+        queueConvert.push(i);
     }
+
+    await queueConvert.drained();
 
     const playlistPath = path.join(hlsFolder, 'playlist.m3u8');
 
