@@ -53,9 +53,10 @@ class Queue {
 
     hasPending() {
         const result = this.db
-            .prepare(`SELECT * FROM process_queue WHERE status = ?`)
-            .get('pending');
-        return !!result
+            .prepare(`SELECT * FROM process_queue WHERE status = ? OR status = ?`)
+            .all('pending', 'processing');
+
+        return result.length > 0
     }
 
     getProcess(id: number | bigint) {
