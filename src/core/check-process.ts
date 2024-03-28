@@ -4,14 +4,12 @@ import fs from 'fs';
 
 export default async function checkProcess() {
     if (process.env.IGNORE_CHECK_PROCESS === 'true') {
-        console.log(`[CHECK_PROCESS] IGNORE_CHECK_PROCESS is true. Ignoring exit...`);
         return;
     }
 
     const hasPending = queue.hasPending();
 
     if (hasPending) {
-        console.log(`[CHECK_PROCESS] Pending process. Ignoring exit...`);
         return;
     }
 
