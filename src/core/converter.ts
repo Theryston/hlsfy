@@ -161,7 +161,7 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string) {
 
     const files = fs.readdirSync(folderPath);
 
-    for (const file of files) {
+    const uploaderQueue = fastq(async (file) => {
         const filePath = path.join(folderPath, file);
         const stat = fs.statSync(filePath);
         if (stat.isDirectory()) {
@@ -176,9 +176,14 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string) {
             }));
             console.log(`[CONVERTER] ${key} uploaded`);
         }
+    }, CONCURRENCY);
+
+    for (const file of files) {
+        uploaderQueue.push(file);
     }
 
-    fs.rmSync(folderPath, { recursive: true, force: true });
+    await uploaderQueue.drained();
+
     console.log(`[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}`);
 }
 

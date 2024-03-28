@@ -18,6 +18,7 @@ class Queue {
         }
 
         fs.mkdirSync(TEMP_DIR, { recursive: true });
+        console.log(`[QUEUE] Queue initialized with concurrency ${CONCURRENCY}`);
     }
 
     push(params: ConverterParams) {

@@ -1,7 +1,7 @@
 {
   "name": "hlsfy",
   "description": "This is an extremely simple open source API with a single objective: transforming any video format into HLS",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "exports": "./dist/index.js",
   "scripts": {
@@ -10,7 +10,7 @@
     "build": "tsc -p ."
   },
   "keywords": [],
-  "author": "",
+  "author": "Theryston Santos",
   "license": "ISC",
   "devDependencies": {
     "@types/axios": "^0.14.0",
@@ -28,6 +28,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "axios": "^1.6.8",
     "better-sqlite3": "^9.4.3",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "fastq": "^1.17.1",
     "ffprobe-static": "^3.1.0",
