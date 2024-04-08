@@ -3,6 +3,7 @@ FROM node:lts-alpine
 WORKDIR /app
 
 COPY ./src ./src
+COPY ./shaka-packager-bin ./
 COPY ./package.json ./
 COPY ./pnpm-lock.yaml ./
 COPY ./tsconfig.json ./
