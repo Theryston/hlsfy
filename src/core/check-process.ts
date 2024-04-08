@@ -1,6 +1,5 @@
-import { TEMP_DIR } from "../constants.js";
+import cleanTemp from "../clean-temp.js";
 import queue from "./queue.js";
-import fs from 'fs';
 
 export default async function checkProcess() {
     if (process.env.IGNORE_CHECK_PROCESS === 'true') {
@@ -14,6 +13,6 @@ export default async function checkProcess() {
     }
 
     console.log(`[CHECK_PROCESS] No pending process. Exit...`);
-    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+    cleanTemp();
     process.exit(0);
 }

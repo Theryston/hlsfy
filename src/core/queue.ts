@@ -3,6 +3,7 @@ import { ConverterParams, converter } from './converter.js';
 import { CONCURRENCY, TEMP_DIR } from '../constants.js';
 import betterSqlite3 from 'better-sqlite3';
 import fs from 'fs';
+import cleanTemp from '../clean-temp.js';
 
 const internalQueue = fastq(converter, CONCURRENCY)
 
@@ -14,10 +15,11 @@ class Queue {
         this.db.prepare(`UPDATE process_queue SET status = ? WHERE status = ? OR status = ?`).run('failed', 'pending', 'processing');
 
         if (fs.existsSync(TEMP_DIR)) {
-            fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+            cleanTemp();
+        } else {
+            fs.mkdirSync(TEMP_DIR, { recursive: true });
         }
 
-        fs.mkdirSync(TEMP_DIR, { recursive: true });
         console.log(`[QUEUE] Queue initialized with concurrency ${CONCURRENCY}`);
     }
 
