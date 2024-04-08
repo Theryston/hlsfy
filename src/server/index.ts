@@ -80,6 +80,10 @@ app.post('/', async (req, res) => {
         return;
     }
 
+    if (!params.defaultAudioLang) {
+        params.defaultAudioLang = 'und';
+    }
+
     const process: any = queue.push(params);
     res.status(200).json({ message: 'Added to queue', ...process });
 })

@@ -28,12 +28,13 @@ type S3 = {
 
 export type ConverterParams = {
     source: string
+    defaultAudioLang: string
     qualities: Quality[]
     s3: S3
     onStart?: () => void
 }
 
-export async function converter({ source, qualities, s3, onStart }: ConverterParams) {
+export async function converter({ source, qualities, s3, onStart, defaultAudioLang }: ConverterParams) {
     if (onStart) {
         onStart();
     }
@@ -81,7 +82,7 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
 
     const hlsFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
 
-    await hlsFy({ videos, audios, hlsFolder });
+    await hlsFy({ videos, audios, hlsFolder, defaultAudioLang });
     console.log('[CONVERTER] HLS files created');
 
     await uploadFolder(hlsFolder, s3);
@@ -90,7 +91,7 @@ export async function converter({ source, qualities, s3, onStart }: ConverterPar
     console.log('[CONVERTER] Done');
 }
 
-async function hlsFy({ videos, audios, hlsFolder }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string }) {
+async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string }) {
     const hlsAudioPaths = audios.map(audio => {
         const folder = path.join(hlsFolder, audio.lang);
 
@@ -112,15 +113,29 @@ async function hlsFy({ videos, audios, hlsFolder }: { videos: { path: string, he
 
     const packager = getShakaPath();
 
+    const defaultAudioLocale = new Intl.Locale(defaultAudioLang);
+    const defaultAudio = audios.find(audio => {
+        if (audio.lang === 'und') {
+            return false;
+        }
+
+        const audioLocale = new Intl.Locale(audio.lang);
+        return defaultAudioLocale.language === audioLocale.language;
+    });
+
+    const defaultLang = defaultAudio?.lang;
     const audiosStr = hlsAudioPaths.map(audio => `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`);
     const videosStr = hlsVideoPaths.map(video => `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`);
 
     const args = [
         ...audiosStr,
         ...videosStr,
+        ...(defaultLang ? ['--default_language', defaultLang] : ''),
         '--hls_master_playlist_output',
         path.join(hlsFolder, 'playlist.m3u8')
     ]
+
+    console.log('[CONVERTER] Creating HLS file with args:', args.join(' '));
 
     await new Promise<void>((resolve, reject) => {
         spawn(packager, args, { stdio: 'inherit' })
@@ -159,7 +174,7 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
             .size(`?x${quality.height}`)
             .output(videoPath)
             .on('progress', (progress) => {
-                console.log(`[CONVERTER] ${progress.percent || 0}% from ${sourcePath} converted...`);
+                console.log(`[CONVERTER|${quality.height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
             })
             .on('end', () => {
                 resolve(videoPath);
@@ -201,7 +216,7 @@ async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts 
             .audioBitrate(audioTrack.avg_bit_rate || '128k')
             .output(audioPath)
             .on('progress', (progress) => {
-                console.log(`[CONVERTER] ${progress.percent || 0}% audio extracted...`);
+                console.log(`[CONVERTER|${audioTrack.tags.language || 'und'}] ${sourcePath} - ${progress.percent || 0}% audio extracted...`);
             })
             .on('end', () => {
                 resolve(audioPath);
