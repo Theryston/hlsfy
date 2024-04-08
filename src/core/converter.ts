@@ -92,8 +92,14 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 }
 
 async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string }) {
-    const hlsAudioPaths = audios.map(audio => {
-        const folder = path.join(hlsFolder, audio.lang);
+    const hlsAudioPaths = audios.map((audio, i) => {
+        let folder = path.join(hlsFolder, audio.lang);
+
+        if (fs.existsSync(folder)) {
+            folder = path.join(hlsFolder, `${i}-${audio.lang}`);
+        } else {
+            fs.mkdirSync(folder, { recursive: true });
+        }
 
         return {
             m3u8: path.join(folder, 'audio.m3u8'),
@@ -101,8 +107,14 @@ async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: 
             in: audio.path
         }
     });
-    const hlsVideoPaths = videos.map(video => {
-        const folder = path.join(hlsFolder, video.height.toString());
+    const hlsVideoPaths = videos.map((video, i) => {
+        let folder = path.join(hlsFolder, video.height.toString());
+
+        if (fs.existsSync(folder)) {
+            folder = path.join(hlsFolder, `${i}-${video.height}`);
+        } else {
+            fs.mkdirSync(folder, { recursive: true });
+        }
 
         return {
             m3u8: path.join(folder, 'video.m3u8'),
