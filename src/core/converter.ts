@@ -7,7 +7,7 @@ import ffmpeg from 'fluent-ffmpeg';
 import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
 import { path as ffprobePath } from 'ffprobe-static';
 import { spawn } from 'child_process';
-import getShakaPath from "./shaka-packager/index.js";
+import getShakaPath from "./shaka-packager.js";
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -256,24 +256,27 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string, attemp
         });
 
         const files = fs.readdirSync(folderPath);
+        const promises = [];
         for (const file of files) {
             const filePath = path.join(folderPath, file);
             const stat = fs.statSync(filePath);
+
             if (stat.isDirectory()) {
                 await uploadFolder(filePath, s3, path.join(subPath || '', file));
             } else {
                 const key = path.join(s3.path, subPath || '', file);
-                console.log(`[CONVERTER] ${key} uploading...`);
-                await client.send(new PutObjectCommand({
+                const command = new PutObjectCommand({
                     Bucket: s3.bucket,
                     Key: key,
                     Body: fs.readFileSync(filePath),
-                }));
-                console.log(`[CONVERTER] ${key} uploaded`);
+                })
+                promises.push(client.send(command));
+                console.log(`[CONVERTER] ${key} added to promises...`);
             }
         }
 
-        console.log(`[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}`);
+        await Promise.all(promises);
+        console.log(`[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}${subPath ? `/${subPath}` : ''}`);
     } catch (error) {
         if (attempts < MAX_RETRY) {
             console.log('[CONVERTER] retrying...');
