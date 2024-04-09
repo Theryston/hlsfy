@@ -67,6 +67,12 @@ passing the following body:
 {
   "source": "https://example.com/video.mp4", // (required) the url of the original video to be processed
   "defaultAudioLang": "en", // (optional) the default audio language to be added to the HLS
+  "subtitles": [ // (optional) the list of subtitles
+    {
+      "url": "https://example.com/subtitles.vtt",
+      "language": "en"
+    }
+  ],
   "qualities": [ // (required) the list of qualities to be processed
     {
       "height": 1080, // (required) the height of the video

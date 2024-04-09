@@ -26,15 +26,21 @@ type S3 = {
     endpoint?: string
 }
 
+type Subtitle = {
+    url: string
+    language: string
+}
+
 export type ConverterParams = {
     source: string
     defaultAudioLang: string
+    subtitles: Subtitle[]
     qualities: Quality[]
     s3: S3
     onStart?: () => void
 }
 
-export async function converter({ source, qualities, s3, onStart, defaultAudioLang }: ConverterParams) {
+export async function converter({ source, qualities, s3, onStart, defaultAudioLang, subtitles: originalSubtitles }: ConverterParams) {
     if (onStart) {
         onStart();
     }
@@ -45,6 +51,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
     const sourceType = await getFileType(sourceRawPath);
     const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
     fs.renameSync(sourceRawPath, sourcePath);
+    const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
 
     const sourceInfos = await getVideoInfos(sourcePath);
     const videoTracks = sourceInfos.streams.filter(stream => stream.codec_type === 'video');
@@ -70,6 +77,16 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
         });
     }
 
+    const subtitles = [];
+    for (const subtitle of originalSubtitles) {
+        const subtitlePath = path.join(subtitleFolder, `${subtitle.language}.vtt`);
+        await downloadFile(subtitle.url, subtitlePath);
+        subtitles.push({
+            path: subtitlePath,
+            language: subtitle.language,
+        });
+    }
+
     const videos = [];
     for (const quality of filteredQualities) {
         const videoPath = await convertVideo({ sourcePath, videoTrack, baseFolder, quality });
@@ -82,7 +99,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 
     const hlsFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
 
-    await hlsFy({ videos, audios, hlsFolder, defaultAudioLang });
+    await hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles });
     console.log('[CONVERTER] HLS files created');
 
     await uploadFolder(hlsFolder, s3);
@@ -91,7 +108,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
     console.log('[CONVERTER] Done');
 }
 
-async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string }) {
+async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string, subtitles: { path: string, language: string }[] }) {
     const hlsAudioPaths = audios.map((audio, i) => {
         let folder = path.join(hlsFolder, audio.lang);
 
@@ -122,6 +139,22 @@ async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: 
             in: video.path
         }
     });
+    const hlsSubtitlesPaths = subtitles.map((subtitle, i) => {
+        let folder = path.join(hlsFolder, 'subtitles');
+
+        if (fs.existsSync(folder)) {
+            folder = path.join(hlsFolder, `subtitles-${i}`);
+        } else {
+            fs.mkdirSync(folder, { recursive: true });
+        }
+
+        return {
+            m3u8: path.join(folder, 'subtitles.m3u8'),
+            folder,
+            in: subtitle.path,
+            language: subtitle.language
+        }
+    })
 
     const packager = getShakaPath();
 
@@ -137,11 +170,13 @@ async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang }: { videos: 
 
     const defaultLang = defaultAudio?.lang;
     const audiosStr = hlsAudioPaths.map(audio => `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`);
+    const subtitlesStr = hlsSubtitlesPaths.map(subtitle => `in=${subtitle.in},stream=text,segment_template=${subtitle.folder}/$Number$.vtt,playlist_name=${subtitle.m3u8},hls_group_id=text,hls_name=${(new Intl.Locale(subtitle.language)).language}`);
     const videosStr = hlsVideoPaths.map(video => `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`);
 
     const args = [
         ...audiosStr,
         ...videosStr,
+        ...subtitlesStr,
         ...(defaultLang ? ['--default_language', defaultLang] : ''),
         '--hls_master_playlist_output',
         path.join(hlsFolder, 'playlist.m3u8')

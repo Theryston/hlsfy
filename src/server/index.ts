@@ -84,6 +84,22 @@ app.post('/', async (req, res) => {
         params.defaultAudioLang = 'und';
     }
 
+    if (!params.subtitles) {
+        params.subtitles = [];
+    }
+
+    for (const subtitle of params.subtitles) {
+        if (!subtitle.url) {
+            res.status(400).json({ error: 'provide subtitle url' });
+            return;
+        }
+
+        if (!subtitle.language) {
+            res.status(400).json({ error: 'provide subtitle language' });
+            return;
+        }
+    }
+
     const process: any = queue.push(params);
     res.status(200).json({ message: 'Added to queue', ...process });
 })
