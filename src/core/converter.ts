@@ -79,8 +79,15 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 
     const subtitles = [];
     for (const subtitle of originalSubtitles) {
-        const subtitlePath = path.join(subtitleFolder, `${subtitle.language}.vtt`);
+        const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
+        let subtitlePath = path.join(subtitleFolder, `${subtitle.language}${ext}`);
         await downloadFile(subtitle.url, subtitlePath);
+
+        if (ext !== '.vtt') {
+            subtitlePath = await tryConvertToVtt(subtitlePath);
+        }
+
+        console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
         subtitles.push({
             path: subtitlePath,
             language: subtitle.language,
@@ -106,6 +113,24 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 
     fs.rmSync(baseFolder, { recursive: true, force: true });
     console.log('[CONVERTER] Done');
+}
+
+async function tryConvertToVtt(subtitlePath: string) {
+    const noExtFilePath = subtitlePath.split('.').slice(0, -1).join('.');
+    const vttFilePath = `${noExtFilePath}.vtt`;
+
+    return new Promise<string>((resolve, reject) => {
+        ffmpeg(subtitlePath)
+            .outputOptions(['-f', 'webvtt'])
+            .output(vttFilePath)
+            .on('end', () => {
+                resolve(vttFilePath);
+            })
+            .on('error', (error) => {
+                reject(error);
+            })
+            .run();
+    });
 }
 
 async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string, subtitles: { path: string, language: string }[] }) {
@@ -170,7 +195,7 @@ async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles }:
 
     const defaultLang = defaultAudio?.lang;
     const audiosStr = hlsAudioPaths.map(audio => `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`);
-    const subtitlesStr = hlsSubtitlesPaths.map(subtitle => `in=${subtitle.in},stream=text,segment_template=${subtitle.folder}/$Number$.vtt,playlist_name=${subtitle.m3u8},hls_group_id=text,hls_name=${(new Intl.Locale(subtitle.language)).language}`);
+    const subtitlesStr = hlsSubtitlesPaths.map(subtitle => `in=${subtitle.in},stream=text,segment_template=${subtitle.folder}/$Number$.webvtt,playlist_name=${subtitle.m3u8},hls_group_id=text,hls_name=${(new Intl.Locale(subtitle.language)).language}`);
     const videosStr = hlsVideoPaths.map(video => `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`);
 
     const args = [
