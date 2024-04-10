@@ -15,6 +15,7 @@
   "devDependencies": {
     "@types/axios": "^0.14.0",
     "@types/better-sqlite3": "^7.6.9",
+    "@types/decompress": "^4.2.7",
     "@types/express": "^4.17.21",
     "@types/ffprobe-static": "^2.0.3",
     "@types/file-type": "^10.9.1",
@@ -28,6 +29,7 @@
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "axios": "^1.6.8",
     "better-sqlite3": "^9.4.3",
+    "decompress": "^4.2.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "fastq": "^1.17.1",

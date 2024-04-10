@@ -9,6 +9,9 @@ import { path as ffprobePath } from 'ffprobe-static';
 import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
+import decompress from "decompress";
+
+const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
 
 const downloadQueue = fastq(downloadWorker, 1);
 
@@ -130,6 +133,26 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 }
 
 async function convertToVtt(subtitlePath: string) {
+    const originalExt = path.extname(subtitlePath).split('?')[0] || '.vtt';
+
+    if (['.vtt', '.webvtt'].includes(originalExt)) {
+        return subtitlePath;
+    }
+
+    const isCompressedFolder = ['.zip', '.gz', '.tgz', '.tar', '.tar.gz', '.tar.bz2', '.tar.xz'].includes(originalExt);
+
+    if (isCompressedFolder) {
+        const unCompressedFolder = fs.mkdtempSync(path.join(TEMP_DIR, '_'));
+        const files = await extractArchive(subtitlePath, unCompressedFolder);
+        const subtitleFile = files.find(file => ALL_SUBTITLE_EXT.includes(path.extname(file.path).split('?')[0] || '.vtt'));
+
+        if (!subtitleFile) {
+            throw new Error('no subtitle file found');
+        }
+
+        subtitlePath = path.join(unCompressedFolder, subtitleFile.path);
+    }
+
     const noExtFilePath = subtitlePath.split('.').slice(0, -1).join('.');
     const vttFilePath = `${noExtFilePath}.vtt`;
 
@@ -145,6 +168,11 @@ async function convertToVtt(subtitlePath: string) {
             })
             .run();
     });
+}
+
+async function extractArchive(sourcePath: string, tempFolder: string) {
+    const archive = await decompress(sourcePath, tempFolder);
+    return archive;
 }
 
 async function hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles }: { videos: { path: string, height: number, bitrate: number }[], audios: { path: string, lang: string }[], hlsFolder: string, defaultAudioLang: string, subtitles: { path: string, language: string }[] }) {
