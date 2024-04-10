@@ -135,10 +135,6 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 async function convertToVtt(subtitlePath: string, baseFolder: string) {
     const originalExt = path.extname(subtitlePath).split('?')[0] || '.vtt';
 
-    if (['.vtt', '.webvtt'].includes(originalExt)) {
-        return subtitlePath;
-    }
-
     const isCompressedFolder = ['.zip', '.gz', '.tgz', '.tar', '.tar.gz', '.tar.bz2', '.tar.xz'].includes(originalExt);
 
     if (isCompressedFolder) {
