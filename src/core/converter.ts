@@ -95,7 +95,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
             await downloadFile(subtitle.url, subtitlePath);
 
             if (!['.vtt', '.webvtt'].includes(ext)) {
-                subtitlePath = await convertToVtt(subtitlePath);
+                subtitlePath = await convertToVtt(subtitlePath, baseFolder);
             }
 
             console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
@@ -132,7 +132,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
     console.log('[CONVERTER] Done');
 }
 
-async function convertToVtt(subtitlePath: string) {
+async function convertToVtt(subtitlePath: string, baseFolder: string) {
     const originalExt = path.extname(subtitlePath).split('?')[0] || '.vtt';
 
     if (['.vtt', '.webvtt'].includes(originalExt)) {
@@ -142,7 +142,7 @@ async function convertToVtt(subtitlePath: string) {
     const isCompressedFolder = ['.zip', '.gz', '.tgz', '.tar', '.tar.gz', '.tar.bz2', '.tar.xz'].includes(originalExt);
 
     if (isCompressedFolder) {
-        const unCompressedFolder = fs.mkdtempSync(path.join(TEMP_DIR, '_'));
+        const unCompressedFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
         const files = await extractArchive(subtitlePath, unCompressedFolder);
         const subtitleFile = files.find(file => ALL_SUBTITLE_EXT.includes(path.extname(file.path).split('?')[0] || '.vtt'));
 
