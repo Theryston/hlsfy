@@ -8,6 +8,9 @@ import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
 import { path as ffprobePath } from 'ffprobe-static';
 import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
+import { promise as fastq } from "fastq";
+
+const downloadQueue = fastq(downloadWorker, 1);
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 ffmpeg.setFfprobePath(ffprobePath);
@@ -68,44 +71,55 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
         throw new Error('no quality found');
     }
 
-    const audios = [];
+    const audios: { path: string, lang: string }[] = [];
+    const audioPromises = [];
     for (const audioTrack of audioTracks) {
-        const audioPath = await extractAudioTrack({ sourcePath, audioTrack, baseFolder });
-        audios.push({
-            path: audioPath,
-            lang: audioTrack.tags?.language || 'und',
-        });
+        audioPromises.push((async () => {
+            const audioPath = await extractAudioTrack({ sourcePath, audioTrack, baseFolder });
+            audios.push({
+                path: audioPath,
+                lang: audioTrack.tags?.language || 'und',
+            });
+        })());
     }
 
-    const subtitles = [];
+    const subtitles: { path: string, language: string }[] = [];
+    const subtitlePromises = [];
     for (const subtitle of originalSubtitles) {
-        const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
-        let subtitlePath = path.join(subtitleFolder, `${subtitle.language}${ext}`);
-        await downloadFile(subtitle.url, subtitlePath);
+        subtitlePromises.push((async () => {
+            const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
+            let subtitlePath = path.join(subtitleFolder, `${subtitle.language}${ext}`);
+            await downloadFile(subtitle.url, subtitlePath);
 
-        if (ext !== '.vtt') {
-            subtitlePath = await tryConvertToVtt(subtitlePath);
-        }
+            if (!['.vtt', '.webvtt'].includes(ext)) {
+                subtitlePath = await convertToVtt(subtitlePath);
+            }
 
-        console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
-        subtitles.push({
-            path: subtitlePath,
-            language: subtitle.language,
-        });
+            console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
+            subtitles.push({
+                path: subtitlePath,
+                language: subtitle.language,
+            });
+        })());
     }
 
-    const videos = [];
+    const videos: { path: string, height: number, bitrate: number }[] = [];
+    const videoPromises = [];
     for (const quality of filteredQualities) {
-        const videoPath = await convertVideo({ sourcePath, videoTrack, baseFolder, quality });
-        videos.push({
-            path: videoPath,
-            height: quality.height,
-            bitrate: quality.bitrate,
-        });
+        videoPromises.push((async () => {
+            const videoPath = await convertVideo({ sourcePath, videoTrack, baseFolder, quality });
+            videos.push({
+                path: videoPath,
+                height: quality.height,
+                bitrate: quality.bitrate,
+            });
+        })());
     }
+
+    const allPromises = [...audioPromises, ...subtitlePromises, ...videoPromises];
+    await Promise.all(allPromises);
 
     const hlsFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
-
     await hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles });
     console.log('[CONVERTER] HLS files created');
 
@@ -115,7 +129,7 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
     console.log('[CONVERTER] Done');
 }
 
-async function tryConvertToVtt(subtitlePath: string) {
+async function convertToVtt(subtitlePath: string) {
     const noExtFilePath = subtitlePath.split('.').slice(0, -1).join('.');
     const vttFilePath = `${noExtFilePath}.vtt`;
 
@@ -375,6 +389,10 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string, attemp
 }
 
 async function downloadFile(url: string, path: string) {
+    await downloadQueue.push({ url, path });
+}
+
+async function downloadWorker({ url, path }: { url: string, path: string }) {
     const writer = fs.createWriteStream(path);
     const response = await axios({
         url,
