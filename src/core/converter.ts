@@ -43,6 +43,7 @@ export type ConverterParams = {
     subtitles: Subtitle[]
     qualities: Quality[]
     s3: S3
+    processId?: number
     onStart?: () => void
 }
 

@@ -1,6 +1,6 @@
 import { promise as fastq } from 'fastq';
 import { ConverterParams, converter } from './converter.js';
-import { CONCURRENCY, TEMP_DIR } from '../constants.js';
+import { CONCURRENCY, TEMP_DIR, MAX_RETRY } from '../constants.js';
 import betterSqlite3 from 'better-sqlite3';
 import fs from 'fs';
 import cleanTemp from '../clean-temp.js';
@@ -23,35 +23,36 @@ class Queue {
         console.log(`[QUEUE] Queue initialized with concurrency ${CONCURRENCY}`);
     }
 
-    push(params: ConverterParams) {
-        const result = this.db
-            .prepare(`INSERT INTO process_queue (status, source) VALUES (?, ?)`)
-            .run('pending', params.source);
+    push(params: ConverterParams, attempt = 0) {
+        const processId = params.processId || this.db.prepare(`INSERT INTO process_queue (status, source) VALUES (?, ?)`).run('pending', params.source).lastInsertRowid;
+
         internalQueue.push({
             ...params,
             onStart: () => {
-                console.log(`[QUEUE] Start processing ${params.source} of id ${result.lastInsertRowid}`);
+                console.log(`[QUEUE] Start processing ${params.source} of id ${processId}`);
                 this.db
                     .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
-                    .run('processing', result.lastInsertRowid);
+                    .run('processing', processId);
             }
         })
             .then(() => {
-                console.log(`[QUEUE] Success while processing ${params.source} of id ${result.lastInsertRowid}`);
+                console.log(`[QUEUE] Success while processing ${params.source} of id ${processId}`);
                 this.db
                     .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
-                    .run('done', result.lastInsertRowid);
+                    .run('done', processId);
             })
             .catch((error) => {
-                console.log(`[QUEUE] Failed while processing ${params.source} of id ${result.lastInsertRowid}`, error);
-                this.db
-                    .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
-                    .run('failed', result.lastInsertRowid);
+                if (attempt >= MAX_RETRY) {
+                    console.log(`[QUEUE] Failed while processing ${params.source} of id ${processId}`, error);
+                    this.db
+                        .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
+                        .run('failed', processId);
+                    return
+                }
+
+                console.log(`[QUEUE] Retry while processing ${params.source} of id ${processId}`);
+                this.push({ ...params, processId: Number(processId) }, attempt + 1)
             })
-
-        const process = this.getProcess(result.lastInsertRowid);
-
-        return process;
     }
 
     hasPending() {
