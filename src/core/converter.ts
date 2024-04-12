@@ -13,6 +13,7 @@ const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt'
 const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
 
 const downloadQueue = fastq(downloadWorker, 1);
+const uploadQueue = fastq(uploadWorker, 50);
 
 
 type Quality = {
@@ -407,11 +408,32 @@ async function getFileType(filePath: string) {
     return result;
 }
 
-async function uploadFolder(folderPath: string, s3: S3, subPath?: string, attempts?: number) {
+async function uploadWorker({ s3, subPath, file, filePath, client, attempts }: { s3: S3, subPath?: string, file: string, filePath: string, client: S3Client, attempts?: number }) {
     if (!attempts) {
         attempts = 0;
     }
 
+    try {
+        const key = path.join(s3.path, subPath || '', file);
+        console.log(`[CONVERTER] uploading ${key}...`);
+        const command = new PutObjectCommand({
+            Bucket: s3.bucket,
+            Key: key,
+            Body: fs.readFileSync(filePath),
+        })
+        await client.send(command);
+        console.log(`[CONVERTER] ${key} was uploaded!`);
+    } catch (error) {
+        if (attempts < MAX_RETRY) {
+            console.log('[CONVERTER] retrying...');
+            await uploadWorker({ s3, subPath, file, filePath, client, attempts: attempts + 1 });
+        } else {
+            throw error;
+        }
+    }
+}
+
+async function uploadFolder(folderPath: string, s3: S3, subPath?: string) {
     try {
         const client = new S3Client({
             region: s3.region,
@@ -423,34 +445,22 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string, attemp
         });
 
         const files = fs.readdirSync(folderPath);
-        const promises = [];
         for (const file of files) {
             const filePath = path.join(folderPath, file);
             const stat = fs.statSync(filePath);
 
             if (stat.isDirectory()) {
-                await uploadFolder(filePath, s3, path.join(subPath || '', file));
+                uploadFolder(filePath, s3, path.join(subPath || '', file));
             } else {
-                const key = path.join(s3.path, subPath || '', file);
-                const command = new PutObjectCommand({
-                    Bucket: s3.bucket,
-                    Key: key,
-                    Body: fs.readFileSync(filePath),
-                })
-                promises.push(client.send(command));
-                console.log(`[CONVERTER] ${key} added to promises...`);
+                uploadQueue.push({ s3, subPath, file, filePath, client });
             }
         }
 
-        await Promise.all(promises);
+        await uploadQueue.drained();
+
         console.log(`[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}${subPath ? `/${subPath}` : ''}`);
     } catch (error) {
-        if (attempts < MAX_RETRY) {
-            console.log('[CONVERTER] retrying...');
-            await uploadFolder(folderPath, s3, subPath, attempts + 1);
-        } else {
-            throw error;
-        }
+        throw error;
     }
 }
 
