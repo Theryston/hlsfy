@@ -26,12 +26,14 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.540.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "axios": "^1.6.8",
     "better-sqlite3": "^9.4.3",
     "decompress": "^4.2.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "fastq": "^1.17.1",
+    "ffprobe-static": "^3.1.0",
     "file-type": "^19.0.0",
     "fluent-ffmpeg": "^2.1.2",
     "node-cron": "^3.0.3"

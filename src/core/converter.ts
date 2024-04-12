@@ -3,6 +3,8 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
+import { path as ffprobePath } from 'ffprobe-static';
 import ffmpeg from 'fluent-ffmpeg';
 import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
@@ -10,11 +12,12 @@ import { promise as fastq } from "fastq";
 import decompress from "decompress";
 
 const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
-const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
 
 const downloadQueue = fastq(downloadWorker, 1);
 const uploadQueue = fastq(uploadWorker, 50);
 
+ffmpeg.setFfmpegPath(ffmpegPath);
+ffmpeg.setFfprobePath(ffprobePath);
 
 type Quality = {
     height: number
@@ -173,7 +176,6 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(subtitlePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions(['-f', 'webvtt'])
             .output(vttFilePath)
             .on('end', () => {
@@ -303,13 +305,10 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
-            .outputOptions([
-                `-map 0:${videoTrackId}`,
-                '-c:v', process.env.CUBA ? 'h264_nvenc' : 'libx264',
-                `-b:v ${quality.bitrate}k`,
-                '-vf', process.env.CUBA ? `scale_npp=${videoScale}` : `scale=${videoScale}`,
-            ])
+            .outputOptions(`-map 0:${videoTrackId}`)
+            .videoCodec('libx264')
+            .videoBitrate(quality.bitrate)
+            .size(videoScale)
             .on('progress', (progress) => {
                 console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
             })
@@ -362,7 +361,6 @@ async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts 
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions([`-map 0:${audioTrackId}`])
             .audioChannels(1)
             .audioCodec('aac')
