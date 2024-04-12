@@ -96,11 +96,16 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
         for (const subtitle of originalSubtitles) {
             subtitlePromises.push((async () => {
                 const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
-                let subtitlePath = path.join(subtitleFolder, `${subtitle.language}${ext}`);
+                let subtitlePath: string | null = path.join(subtitleFolder, `${subtitle.language}${ext}`);
                 await downloadFile(subtitle.url, subtitlePath);
 
                 if (!['.vtt', '.webvtt'].includes(ext)) {
                     subtitlePath = await convertToVtt(subtitlePath, baseFolder);
+                }
+
+                if (!subtitlePath) {
+                    console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
+                    return;
                 }
 
                 console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
@@ -174,7 +179,7 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
     const subtitleTempFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
     const vttFilePath = `${subtitleTempFolder}/subtitle.vtt`;
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<string | null>((resolve) => {
         ffmpeg(subtitlePath)
             .outputOptions(['-f', 'webvtt'])
             .output(vttFilePath)
@@ -182,7 +187,8 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
                 resolve(vttFilePath);
             })
             .on('error', (error) => {
-                reject(error);
+                console.log('[CONVERTER] failed to convert subtitle', error);
+                resolve(null);
             })
             .run();
     });
@@ -297,18 +303,15 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
     const videoFolderPath = fs.mkdtempSync(path.join(baseFolder, '_'));
     const videoPath = path.join(videoFolderPath, 'video.mp4');
     const videoTrackId = videoTrack.index;
-    let width = await getResponsiveWidth(quality.height, sourcePath);
-    width = width % 2 === 1 ? width + 1 : width;
-    const height = quality.height % 2 === 1 ? quality.height + 1 : quality.height;
-    const videoScale = `${width}:${height}`
-    console.log(`[CONVERTER|${height}] ${sourcePath} - ${width}x${height} converted...`);
+    const height = videoTrack.height;
+    console.log(`[CONVERTER|${height}] ${sourcePath} - ${height} converted...`);
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
             .outputOptions(`-map 0:${videoTrackId}`)
             .videoCodec('libx264')
             .videoBitrate(quality.bitrate)
-            .size(videoScale)
+            .size(`?x${height}`)
             .on('progress', (progress) => {
                 console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
             })
@@ -325,20 +328,6 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
             })
             .save(videoPath);
     })
-}
-
-async function getResponsiveWidth(height: number, sourcePath: string) {
-    const sourceInfos = await getVideoInfos(sourcePath);
-    const videoTrack = sourceInfos.streams.filter(stream => stream.codec_type === 'video').sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-
-    if (!videoTrack || !videoTrack.height || !videoTrack.width) {
-        throw new Error('no video track found');
-    }
-
-    const aspectRatio = videoTrack.height / videoTrack.width;
-    const responsiveWidth = Math.round(height / aspectRatio);
-
-    return responsiveWidth;
 }
 
 
