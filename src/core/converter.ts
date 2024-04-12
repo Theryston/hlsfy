@@ -4,19 +4,16 @@ import fs from 'fs';
 import path from 'path';
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ffmpeg from 'fluent-ffmpeg';
-import { path as ffmpegPath } from '@ffmpeg-installer/ffmpeg';
-import { path as ffprobePath } from 'ffprobe-static';
 import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
 import decompress from "decompress";
 
 const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
+const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
 
 const downloadQueue = fastq(downloadWorker, 1);
 
-ffmpeg.setFfmpegPath(ffmpegPath);
-ffmpeg.setFfprobePath(ffprobePath);
 
 type Quality = {
     height: number
@@ -49,6 +46,7 @@ export type ConverterParams = {
 
 export async function converter({ source, qualities, s3, onStart, defaultAudioLang, subtitles: originalSubtitles }: ConverterParams) {
     const baseFolder = fs.mkdtempSync(path.join(TEMP_DIR, '_'));
+    const start = Date.now();
 
     try {
         if (onStart) {
@@ -133,8 +131,23 @@ export async function converter({ source, qualities, s3, onStart, defaultAudioLa
 
         console.log('[CONVERTER] Done');
     } finally {
+        const end = Date.now();
+        const duration = end - start;
+        console.log(`[CONVERTER] the process for ${source} took ${formatTime(duration)}`);
         fs.rmSync(baseFolder, { recursive: true, force: true });
     }
+}
+
+function formatTime(ms: number) {
+    let hours = Math.floor(ms / 3600000);
+    let minutes = Math.floor((ms % 3600000) / 60000);
+    let seconds = Math.floor(((ms % 3600000) % 60000) / 1000);
+
+    let hoursStr = hours < 10 ? "0" + hours : hours;
+    let minutesStr = minutes < 10 ? "0" + minutes : minutes;
+    let secondsStr = seconds < 10 ? "0" + seconds : seconds;
+
+    return `${hoursStr}:${minutesStr}:${secondsStr}`
 }
 
 async function convertToVtt(subtitlePath: string, baseFolder: string) {
@@ -159,6 +172,7 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(subtitlePath)
+            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions(['-f', 'webvtt'])
             .output(vttFilePath)
             .on('end', () => {
@@ -280,16 +294,23 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
     const videoFolderPath = fs.mkdtempSync(path.join(baseFolder, '_'));
     const videoPath = path.join(videoFolderPath, 'video.mp4');
     const videoTrackId = videoTrack.index;
+    let width = await getResponsiveWidth(quality.height, sourcePath);
+    width = width % 2 === 1 ? width + 1 : width;
+    const height = quality.height % 2 === 1 ? quality.height + 1 : quality.height;
+    const videoScale = `${width}:${height}`
+    console.log(`[CONVERTER|${height}] ${sourcePath} - ${width}x${height} converted...`);
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
-            .outputOptions(['-map 0:' + videoTrackId])
-            .videoCodec('libx264')
-            .videoBitrate(quality.bitrate)
-            .size(`?x${quality.height}`)
-            .output(videoPath)
+            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
+            .outputOptions([
+                `-map 0:${videoTrackId}`,
+                '-c:v', process.env.CUBA ? 'h264_nvenc' : 'h264',
+                `-b:v ${quality.bitrate}k`,
+                '-vf', process.env.CUBA ? `scale_cuda=${videoScale}` : `scale=${videoScale}`,
+            ])
             .on('progress', (progress) => {
-                console.log(`[CONVERTER|${quality.height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
+                console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
             })
             .on('end', () => {
                 resolve(videoPath);
@@ -302,9 +323,24 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
                     reject(err);
                 }
             })
-            .run();
+            .save(videoPath);
     })
 }
+
+async function getResponsiveWidth(height: number, sourcePath: string) {
+    const sourceInfos = await getVideoInfos(sourcePath);
+    const videoTrack = sourceInfos.streams.filter(stream => stream.codec_type === 'video').sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+
+    if (!videoTrack || !videoTrack.height || !videoTrack.width) {
+        throw new Error('no video track found');
+    }
+
+    const aspectRatio = videoTrack.height / videoTrack.width;
+    const responsiveWidth = Math.round(height / aspectRatio);
+
+    return responsiveWidth;
+}
+
 
 async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts }: { sourcePath: string, audioTrack: ffmpeg.FfprobeStream, baseFolder: string, attempts?: number }) {
     if (!attempts) {
@@ -325,6 +361,7 @@ async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts 
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
+            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions([`-map 0:${audioTrackId}`])
             .audioChannels(1)
             .audioCodec('aac')
