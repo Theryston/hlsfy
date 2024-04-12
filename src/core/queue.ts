@@ -42,16 +42,19 @@ class Queue {
                     .run('done', processId);
             })
             .catch((error) => {
+                console.log(`[QUEUE] Failed while processing ${params.source} of id ${processId}:`);
+                console.log(error);
+
                 if (attempt >= MAX_RETRY) {
-                    console.log(`[QUEUE] Failed while processing ${params.source} of id ${processId}`, error);
+                    console.log(`[QUEUE] Retry limit reached while processing ${params.source} of id ${processId}`);
                     this.db
                         .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
                         .run('failed', processId);
                     return
                 }
 
-                console.log(`[QUEUE] Retry while processing ${params.source} of id ${processId}`);
                 this.push({ ...params, processId: Number(processId) }, attempt + 1)
+                console.log(`[QUEUE] added ${params.source} of id ${processId} to queue for retry...`);
             })
     }
 
