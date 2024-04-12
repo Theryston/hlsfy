@@ -167,8 +167,8 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
         subtitlePath = path.join(unCompressedFolder, subtitleFile.path);
     }
 
-    const noExtFilePath = subtitlePath.split('.').slice(0, -1).join('.');
-    const vttFilePath = `${noExtFilePath}.vtt`;
+    const subtitleTempFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
+    const vttFilePath = `${subtitleTempFolder}/subtitle.vtt`;
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(subtitlePath)
@@ -305,9 +305,9 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
             .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions([
                 `-map 0:${videoTrackId}`,
-                '-c:v', process.env.CUBA ? 'h264_nvenc' : 'h264',
+                '-c:v', process.env.CUBA ? 'h264_nvenc' : 'libx264',
                 `-b:v ${quality.bitrate}k`,
-                '-vf', process.env.CUBA ? `scale_cuda=${videoScale}` : `scale=${videoScale}`,
+                '-vf', process.env.CUBA ? `scale_npp=${videoScale}` : `scale=${videoScale}`,
             ])
             .on('progress', (progress) => {
                 console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
