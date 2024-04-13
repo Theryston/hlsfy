@@ -343,6 +343,7 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
+            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions([
                 `-map 0:${videoTrackId}`,
                 '-c:v', process.env.CUDA ? 'h264_nvenc' : 'libx264',
