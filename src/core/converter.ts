@@ -13,7 +13,7 @@ import subtitleLib from 'subtitle';
 const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
 const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
 
-const downloadQueue = fastq(downloadWorker, 1);
+const downloadQueue = fastq(downloadWorker, 5);
 const uploadQueue = fastq(uploadWorker, 50);
 
 type Quality = {
@@ -45,102 +45,130 @@ export type ConverterParams = {
     onStart?: () => void
 }
 
-export async function converter({ source, qualities, s3, onStart, defaultAudioLang, subtitles: originalSubtitles }: ConverterParams) {
+async function main() {
+    const fileParams = process.argv[2];
+
+    if (!fileParams) {
+        return;
+    }
+
+    const paramsString = fs.readFileSync(fileParams, 'utf8');
+    const params: ConverterParams = JSON.parse(paramsString);
+
+    await converter(params);
+}
+
+main();
+
+async function converter({ source, qualities, s3, onStart, defaultAudioLang, subtitles: originalSubtitles }: ConverterParams) {
     const baseFolder = fs.mkdtempSync(path.join(TEMP_DIR, '_'));
+
+    if (onStart) {
+        onStart();
+    }
+
+    const sourceRawPath = path.join(baseFolder, 'source');
+    await downloadFile(source, sourceRawPath);
+    const sourceType = await getFileType(sourceRawPath);
+    const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
+    fs.renameSync(sourceRawPath, sourcePath);
+    const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
+
+    const sourceInfos = await getVideoInfos(sourcePath);
+    const videoTracks = sourceInfos.streams.filter(stream => stream.codec_type === 'video');
+    const audioTracks = sourceInfos.streams.filter(stream => stream.codec_type === 'audio');
+
+    if (!videoTracks.length) {
+        throw new Error('no video tracks found');
+    }
+
+    const videoTrack = videoTracks.sort((a, b) => (b.height || 0) - (a.height || 0))[0];
+    const filteredQualities = qualities.filter(quality => quality.height <= (videoTrack.height || 0));
+
+    if (!filteredQualities.length) {
+        throw new Error('no quality found');
+    }
+
+    const audios: { path: string, lang: string }[] = [];
+    const audioPromises = [];
+    for (const audioTrack of audioTracks) {
+        audioPromises.push((async () => {
+            const audioPath = await extractAudioTrack({ sourcePath, audioTrack, baseFolder });
+            audios.push({
+                path: audioPath,
+                lang: audioTrack.tags?.language || 'und',
+            });
+        })());
+    }
+
+    const subtitles: { path: string, language: string }[] = [];
+    const subtitlePromises = [];
+    for (const subtitle of originalSubtitles) {
+        subtitlePromises.push((async () => {
+            const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
+            let subtitlePath: string | null = path.join(subtitleFolder, `${subtitle.language}${ext}`);
+            await downloadFile(subtitle.url, subtitlePath);
+
+            if (!['.vtt', '.webvtt'].includes(ext)) {
+                subtitlePath = await convertToVtt(subtitlePath, baseFolder);
+            }
+
+            if (!subtitlePath) {
+                console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
+                return;
+            }
+
+            console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
+            subtitles.push({
+                path: subtitlePath,
+                language: subtitle.language,
+            });
+        })());
+    }
+
+    const videos: { path: string, height: number, bitrate: number }[] = [];
+    const videoPromises = [];
+    for (const quality of filteredQualities) {
+        videoPromises.push((async () => {
+            const videoPath = await convertVideo({ sourcePath, videoTrack, baseFolder, quality });
+            videos.push({
+                path: videoPath,
+                height: quality.height,
+                bitrate: quality.bitrate,
+            });
+        })());
+    }
+
+    const allPromises = [...audioPromises, ...subtitlePromises, ...videoPromises];
+    await runPromises(allPromises, () => deleteFolder(baseFolder));
+
+    const hlsFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
+    await hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles });
+    console.log('[CONVERTER] HLS files created');
+
+    await uploadFolder(hlsFolder, s3);
+    deleteFolder(baseFolder);
+}
+
+function deleteFolder(path: string) {
+    console.log(`[CONVERTER] deleting ${path}`);
+    fs.rmSync(path, { recursive: true, force: true });
+}
+
+async function runPromises(allPromises: Promise<any>[], onError: (error: any) => void) {
     const start = Date.now();
-
     try {
-        if (onStart) {
-            onStart();
-        }
-
-        const sourceRawPath = path.join(baseFolder, 'source');
-        await downloadFile(source, sourceRawPath);
-        const sourceType = await getFileType(sourceRawPath);
-        const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
-        fs.renameSync(sourceRawPath, sourcePath);
-        const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
-
-        const sourceInfos = await getVideoInfos(sourcePath);
-        const videoTracks = sourceInfos.streams.filter(stream => stream.codec_type === 'video');
-        const audioTracks = sourceInfos.streams.filter(stream => stream.codec_type === 'audio');
-
-        if (!videoTracks.length) {
-            throw new Error('no video tracks found');
-        }
-
-        const videoTrack = videoTracks.sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-        const filteredQualities = qualities.filter(quality => quality.height <= (videoTrack.height || 0));
-
-        if (!filteredQualities.length) {
-            throw new Error('no quality found');
-        }
-
-        const audios: { path: string, lang: string }[] = [];
-        const audioPromises = [];
-        for (const audioTrack of audioTracks) {
-            audioPromises.push((async () => {
-                const audioPath = await extractAudioTrack({ sourcePath, audioTrack, baseFolder });
-                audios.push({
-                    path: audioPath,
-                    lang: audioTrack.tags?.language || 'und',
-                });
-            })());
-        }
-
-        const subtitles: { path: string, language: string }[] = [];
-        const subtitlePromises = [];
-        for (const subtitle of originalSubtitles) {
-            subtitlePromises.push((async () => {
-                const ext = path.extname(subtitle.url).split('?')[0] || '.vtt';
-                let subtitlePath: string | null = path.join(subtitleFolder, `${subtitle.language}${ext}`);
-                await downloadFile(subtitle.url, subtitlePath);
-
-                if (!['.vtt', '.webvtt'].includes(ext)) {
-                    subtitlePath = await convertToVtt(subtitlePath, baseFolder);
-                }
-
-                if (!subtitlePath) {
-                    console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
-                    return;
-                }
-
-                console.log(`[CONVERTER] subtitle ${subtitlePath} was processed!`);
-                subtitles.push({
-                    path: subtitlePath,
-                    language: subtitle.language,
-                });
-            })());
-        }
-
-        const videos: { path: string, height: number, bitrate: number }[] = [];
-        const videoPromises = [];
-        for (const quality of filteredQualities) {
-            videoPromises.push((async () => {
-                const videoPath = await convertVideo({ sourcePath, videoTrack, baseFolder, quality });
-                videos.push({
-                    path: videoPath,
-                    height: quality.height,
-                    bitrate: quality.bitrate,
-                });
-            })());
-        }
-
-        const allPromises = [...audioPromises, ...subtitlePromises, ...videoPromises];
         await Promise.all(allPromises);
+        console.log(`[CONVERTER] all promises processed in: ${formatTime(Date.now() - start)}`);
+    } catch (error) {
+        console.error(error);
 
-        const hlsFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
-        await hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles });
-        console.log('[CONVERTER] HLS files created');
+        if (onError) {
+            onError(error);
+        }
 
-        await uploadFolder(hlsFolder, s3);
-
-        console.log('[CONVERTER] Done');
-    } finally {
-        const end = Date.now();
-        const duration = end - start;
-        console.log(`[CONVERTER] the process for ${source} took ${formatTime(duration)}`);
-        fs.rmSync(baseFolder, { recursive: true, force: true });
+        console.log(`[CONVERTER] failed in: ${formatTime(Date.now() - start)}`);
+        process.exit(1);
     }
 }
 
