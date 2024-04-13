@@ -339,7 +339,7 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
     width = width % 2 === 1 ? width + 1 : width;
     const height = quality.height % 2 === 1 ? quality.height + 1 : quality.height;
     const videoScale = `${width}:${height}`;
-    console.log(`[CONVERTER|${height}] ${sourcePath} - ${height} converted...`);
+    console.log(`[CONVERTER|${height}] ${sourcePath} - ${height} starting conversion...`);
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
