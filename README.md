@@ -14,9 +14,6 @@ You can just run the docker hub image with just one command:
 
 ```bash
 docker run -p 3000:3000 theryston/hlsfy
-
-# CUDA acceleration
-docker run -p 3000:3000 -d theryston/hlsfy:cuda
 ```
 
 That's it, the API will already be running on port 3000 without you needing to

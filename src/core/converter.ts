@@ -11,7 +11,6 @@ import decompress from "decompress";
 import subtitleLib from 'subtitle';
 
 const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
-const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
 
 const downloadQueue = fastq(downloadWorker, 5);
 const uploadQueue = fastq(uploadWorker, 50);
@@ -335,23 +334,15 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
     const videoFolderPath = fs.mkdtempSync(path.join(baseFolder, '_'));
     const videoPath = path.join(videoFolderPath, 'video.mp4');
     const videoTrackId = videoTrack.index;
-    let width = await getResponsiveWidth(quality.height, sourcePath);
-    width = width % 2 === 1 ? width + 1 : width;
-    const height = quality.height % 2 === 1 ? quality.height + 1 : quality.height;
-    const videoScale = `${width}:${height}`;
-    console.log(`[CONVERTER|${height}] ${sourcePath} - ${height} starting conversion...`);
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
-            .outputOptions([
-                `-map 0:${videoTrackId}`,
-                '-c:v', process.env.CUDA ? 'h264_nvenc' : 'libx264',
-                `-b:v ${quality.bitrate}k`,
-                '-vf', process.env.CUDA ? `scale_cuda=${videoScale}` : `scale=${videoScale}`,
-            ])
+            .outputOptions([`-map 0:${videoTrackId}`])
+            .videoCodec('libx264')
+            .videoBitrate(quality.bitrate)
+            .size(`?x${quality.height}`)
             .on('progress', (progress) => {
-                console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
+                console.log(`[CONVERTER|${quality.height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
             })
             .on('end', () => {
                 resolve(videoPath);
@@ -366,20 +357,6 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
             })
             .save(videoPath);
     })
-}
-
-async function getResponsiveWidth(height: number, sourcePath: string) {
-    const sourceInfos = await getVideoInfos(sourcePath);
-    const videoTrack = sourceInfos.streams.filter(stream => stream.codec_type === 'video').sort((a, b) => (b.height || 0) - (a.height || 0))[0];
-
-    if (!videoTrack || !videoTrack.height || !videoTrack.width) {
-        throw new Error('no video track found');
-    }
-
-    const aspectRatio = videoTrack.height / videoTrack.width;
-    const responsiveWidth = Math.round(height / aspectRatio);
-
-    return responsiveWidth;
 }
 
 async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts }: { sourcePath: string, audioTrack: ffmpeg.FfprobeStream, baseFolder: string, attempts?: number }) {
@@ -401,7 +378,6 @@ async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts 
 
     return new Promise<string>((resolve, reject) => {
         ffmpeg(sourcePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
             .outputOptions([`-map 0:${audioTrackId}`])
             .audioChannels(1)
             .audioCodec('aac')
