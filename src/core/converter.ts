@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
 import decompress from "decompress";
+import subtitleLib from 'subtitle';
 
 const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
 const CUDA_OPTIONS = ['-vsync', '0', '-hwaccel', 'cuda', '-hwaccel_output_format', 'cuda']
@@ -155,7 +156,7 @@ function formatTime(ms: number) {
     return `${hoursStr}:${minutesStr}:${secondsStr}`
 }
 
-async function convertToVtt(subtitlePath: string, baseFolder: string) {
+async function convertToVtt(subtitlePath: string, baseFolder: string): Promise<string | null> {
     const originalExt = path.extname(subtitlePath).split('?')[0] || '.vtt';
 
     const isCompressedFolder = ['.zip', '.gz', '.tgz', '.tar', '.tar.gz', '.tar.bz2', '.tar.xz'].includes(originalExt);
@@ -174,20 +175,26 @@ async function convertToVtt(subtitlePath: string, baseFolder: string) {
 
     const subtitleTempFolder = fs.mkdtempSync(path.join(baseFolder, '_'));
     const vttFilePath = `${subtitleTempFolder}/subtitle.vtt`;
+    const sourceExt = path.extname(subtitlePath).split('?')[0] || '.vtt';
 
-    return new Promise<string | null>((resolve) => {
-        ffmpeg(subtitlePath)
-            .addInputOptions(process.env.CUDA ? CUDA_OPTIONS : [])
-            .outputOptions(['-f', 'webvtt'])
-            .output(vttFilePath)
-            .on('end', () => {
-                resolve(vttFilePath);
-            })
+    if (['.vtt', '.webvtt'].includes(sourceExt)) {
+        fs.copyFileSync(subtitlePath, vttFilePath);
+        return vttFilePath;
+    }
+
+    return await new Promise((resolve) => {
+        fs.createReadStream(subtitlePath)
+            .pipe(subtitleLib.parse())
+            .pipe(subtitleLib.stringify({ format: 'WebVTT' }))
+            .pipe(fs.createWriteStream(vttFilePath))
             .on('error', (error) => {
                 console.log('[CONVERTER] failed to convert subtitle', error);
                 resolve(null);
             })
-            .run();
+            .on('finish', () => {
+                console.log(`[CONVERTER] subtitle ${vttFilePath} was processed!`);
+                resolve(vttFilePath);
+            })
     });
 }
 
