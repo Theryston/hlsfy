@@ -347,7 +347,7 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
                 `-map 0:${videoTrackId}`,
                 '-c:v', process.env.CUDA ? 'h264_nvenc' : 'libx264',
                 `-b:v ${quality.bitrate}k`,
-                '-vf', process.env.CUDA ? `scale_npp=${videoScale}` : `scale=${videoScale}`,
+                '-vf', process.env.CUDA ? `scale_cuda=${videoScale}` : `scale=${videoScale}`,
             ])
             .on('progress', (progress) => {
                 console.log(`[CONVERTER|${height}] ${sourcePath} - ${progress.percent || 0}% converted...`);
