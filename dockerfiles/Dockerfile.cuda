@@ -1,0 +1,44 @@
+FROM ubuntu:22.04
+
+RUN apt update -q && apt install -y ca-certificates wget \
+    && wget -qO /cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i /cuda-keyring.deb && apt update -q \
+    && apt install -y --no-install-recommends ffmpeg libcudnn8 libcublas-12-2
+
+ENV NODE_VERSION=18.12.1
+RUN apt update -y
+RUN apt install -y curl
+RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
+ENV NVM_DIR=/root/.nvm
+RUN . "$NVM_DIR/nvm.sh" && nvm install ${NODE_VERSION}
+RUN . "$NVM_DIR/nvm.sh" && nvm use v${NODE_VERSION}
+RUN . "$NVM_DIR/nvm.sh" && nvm alias default v${NODE_VERSION}
+ENV PATH="/root/.nvm/versions/node/v${NODE_VERSION}/bin/:${PATH}"
+RUN node --version
+RUN npm --version
+
+WORKDIR /app
+
+COPY ./src ./src
+COPY ./shaka-packager-bin ./shaka-packager-bin
+COPY ./package.json ./
+COPY ./pnpm-lock.yaml ./
+COPY ./tsconfig.json ./
+COPY ./start.sh ./
+
+RUN npm install -g pnpm
+
+RUN pnpm install
+RUN pnpm build
+
+RUN pnpm prune --prod
+RUN rm -rf ./src
+
+ENV NODE_ENV=production
+ENV CUDA=1
+
+EXPOSE 3000
+
+RUN chmod +x ./start.sh
+
+CMD ["sh", "./start.sh"]
