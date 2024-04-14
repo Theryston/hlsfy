@@ -409,7 +409,7 @@ async function convertVideo({ sourcePath, videoTrack, baseFolder, quality, attem
             })
             .on('error', async (err) => {
                 if (attempts < MAX_RETRY) {
-                    console.log('[CONVERTER] retrying...');
+                    console.log(`[CONVERTER|${quality.height}] ${sourcePath} - ${err.message} - retrying...`);
                     resolve(await convertVideo({ sourcePath, videoTrack, baseFolder, quality, attempts: attempts + 1 }));
                 } else {
                     reject(err);
@@ -451,7 +451,7 @@ async function extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts 
             })
             .on('error', async (err) => {
                 if (attempts < MAX_RETRY) {
-                    console.log('[CONVERTER] retrying...');
+                    console.log(`[CONVERTER|${audioTrack.tags.language || 'und'}] ${sourcePath} - ${err.message} - retrying...`);
                     resolve(await extractAudioTrack({ sourcePath, audioTrack, baseFolder, attempts: attempts + 1 }));
                 } else {
                     reject(err);
@@ -488,8 +488,8 @@ async function uploadWorker({ s3, subPath, file, filePath, client, attempts }: {
         attempts = 0;
     }
 
+    const key = path.join(s3.path, subPath || '', file);
     try {
-        const key = path.join(s3.path, subPath || '', file);
         console.log(`[CONVERTER] uploading ${key}...`);
         const command = new PutObjectCommand({
             Bucket: s3.bucket,
@@ -498,9 +498,9 @@ async function uploadWorker({ s3, subPath, file, filePath, client, attempts }: {
         })
         await client.send(command);
         console.log(`[CONVERTER] ${key} was uploaded!`);
-    } catch (error) {
+    } catch (error: any) {
         if (attempts < MAX_RETRY) {
-            console.log('[CONVERTER] retrying...');
+            console.log(`[CONVERTER] ${key} - ${error.message} - retrying...`);
             await uploadWorker({ s3, subPath, file, filePath, client, attempts: attempts + 1 });
         } else {
             throw error;
@@ -543,7 +543,11 @@ async function downloadFile(url: string, path: string) {
     await downloadQueue.push({ url, path });
 }
 
-async function downloadWorker({ url, path }: { url: string, path: string }) {
+async function downloadWorker({ url, path, attempts }: { url: string, path: string, attempts?: number }) {
+    if (!attempts) {
+        attempts = 0;
+    }
+
     const writer = fs.createWriteStream(path);
     const response = await axios({
         url,
@@ -563,7 +567,12 @@ async function downloadWorker({ url, path }: { url: string, path: string }) {
             resolve(true);
         });
 
-        writer.on('error', (error) => {
+        writer.on('error', async (error) => {
+            if (attempts < MAX_RETRY) {
+                console.log(`[CONVERTER] ${url} download failed... retrying...`);
+                return await downloadWorker({ url, path, attempts: attempts + 1 });
+            }
+
             console.log(`[CONVERTER] ${url} download failed...`, error);
             reject(false);
         });

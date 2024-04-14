@@ -1,6 +1,6 @@
 import { promise as fastq } from 'fastq';
 import { ConverterParams } from './converter.js';
-import { CONCURRENCY, TEMP_DIR, MAX_RETRY } from '../constants.js';
+import { CONCURRENCY, TEMP_DIR } from '../constants.js';
 import betterSqlite3 from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -81,17 +81,9 @@ class Queue {
             })
             .catch(() => {
                 console.error(`[QUEUE] Failed while processing ${params.source} of id ${processId}`);
-
-                if (attempt >= MAX_RETRY) {
-                    console.log(`[QUEUE] Retry limit reached while processing ${params.source} of id ${processId}`);
-                    this.db
-                        .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
-                        .run('failed', processId);
-                    return
-                }
-
-                console.log(`[QUEUE] adding ${params.source} of id ${processId} to queue for retry...`);
-                this.push({ ...params, processId: Number(processId) }, attempt + 1)
+                this.db
+                    .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
+                    .run('failed', processId);
             })
     }
 
