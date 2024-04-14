@@ -34,7 +34,6 @@
     "fastq": "^1.17.1",
     "file-type": "^19.0.0",
     "fluent-ffmpeg": "^2.1.2",
-    "node-cron": "^3.0.3",
-    "subtitle": "^4.2.1"
+    "node-cron": "^3.0.3"
   }
 }

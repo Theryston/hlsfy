@@ -8,9 +8,9 @@ import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
 import decompress from "decompress";
-import subtitleLib from 'subtitle';
 
-const ALL_SUBTITLE_EXT = ['.srt', '.sub', '.sbv', '.ass', '.ssa', '.vtt', '.txt', '.smi', '.webvtt']
+const ALL_SUBTITLE_EXT = ['.srt', '.vtt', '.webvtt']
+const ALLOWED_TO_CONVERT_SUBTITLE = ['.srt']
 
 const downloadQueue = fastq(downloadWorker, 5);
 const uploadQueue = fastq(uploadWorker, 50);
@@ -209,20 +209,80 @@ async function convertToVtt(subtitlePath: string, baseFolder: string): Promise<s
         return vttFilePath;
     }
 
-    return await new Promise((resolve) => {
-        fs.createReadStream(subtitlePath)
-            .pipe(subtitleLib.parse())
-            .pipe(subtitleLib.stringify({ format: 'WebVTT' }))
-            .pipe(fs.createWriteStream(vttFilePath))
-            .on('error', (error) => {
-                console.log('[CONVERTER] failed to convert subtitle', error);
-                resolve(null);
-            })
-            .on('finish', () => {
-                console.log(`[CONVERTER] subtitle ${vttFilePath} was processed!`);
-                resolve(vttFilePath);
-            })
-    });
+    if (!ALLOWED_TO_CONVERT_SUBTITLE.includes(sourceExt)) {
+        console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
+        return null;
+    }
+
+    const converterSubtitle: Record<string, (subtitlePath: string, baseFolder: string) => Promise<string | null>> = {
+        '.srt': srtToVtt
+    }
+
+    const converterFunc = converterSubtitle[sourceExt];
+
+    if (!converterFunc) {
+        console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
+        return null;
+    }
+
+    return await converterFunc(subtitlePath, baseFolder);
+}
+
+async function srtToVtt(subtitlePath: string, baseFolder: string): Promise<string | null> {
+    const srt = fs.readFileSync(subtitlePath, 'utf8');
+    const srtLines = srt.split('\n');
+
+    if (!srtLines.length) {
+        return null;
+    }
+
+    const parts = [];
+    const blankLine = ['', '\n\n', '\n', '\r\n', '\r', '\t', '\t\t', '\t\t\t'];
+
+    let allLinesPart = [];
+    for (const line of srtLines) {
+        if (blankLine.includes(line)) {
+            parts.push(allLinesPart);
+            allLinesPart = [];
+        } else {
+            allLinesPart.push(line);
+        }
+    }
+
+    let vttStr = 'WEBVTT\n\n';
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        const timeIndex = part.findIndex(line => line.includes(' --> '));
+
+        if (timeIndex < 0) {
+            continue;
+        }
+
+        const id = i + 1;
+        const startAt = part[timeIndex].split(' --> ')[0];
+        const endAt = part[timeIndex].split(' --> ')[1];
+        const vttStartAt = timeSrtToVtt(startAt);
+        const vttEndAt = timeSrtToVtt(endAt);
+        const texts = part.slice(timeIndex + 1);
+        vttStr += `${id}\n${vttStartAt} --> ${vttEndAt}\n${texts.join('\n')}\n\n`;
+    }
+
+    const tempSubtitle = fs.mkdtempSync(path.join(baseFolder, '_'));
+    const vttFilePath = path.join(tempSubtitle, 'subtitle.vtt');
+    fs.writeFileSync(vttFilePath, vttStr);
+
+    return vttFilePath;
+}
+
+function timeSrtToVtt(time: string) {
+    const [hours, minutes, last] = time.split(':');
+    const [seconds, milliseconds] = last.split(',');
+    const numHours = Number(hours || '0');
+    const numMinutes = Number(minutes || '0');
+    const numSeconds = Number(seconds || '0');
+    const numMilliseconds = Number(milliseconds || '0');
+    const strTime = `${numHours.toString().padStart(2, '0')}:${numMinutes.toString().padStart(2, '0')}:${numSeconds.toString().padStart(2, '0')}.${numMilliseconds.toString().padStart(3, '0')}`;
+    return strTime;
 }
 
 async function extractArchive(sourcePath: string, tempFolder: string) {
