@@ -55,7 +55,9 @@ The API has the following statuses:
 To use this API is very simple, it only has three routes: `POST /`, `GET /` and
 `GET /:id`, let's dive deeper into them:
 
-### POST /
+### Start a new process
+
+#### POST /
 
 This wheel is used to add a video to the queue to be processed, just call it by
 passing the following body:
@@ -102,6 +104,13 @@ This route you return the following JSON:
   "source": "https://example.com/video.mp4" // the original source
 }
 ```
+
+#### Using ENV Variables
+
+The hlsfy can start a process by using environment variables, just set the env
+variable
+`INITIAL_ITEMS="[{source: "https://example.com/video.mp4", ...all_the_same_options_from_the_body}]"`
+and it will be added to the queue automatically when the service starts.
 
 ### GET /
 

@@ -59,6 +59,17 @@ class Queue {
         }
 
         console.log(`[QUEUE] Queue initialized with concurrency ${CONCURRENCY}`);
+
+        let initialItems = JSON.parse(process.env.INITIAL_ITEMS || '[]');
+
+        if (!Array.isArray(initialItems)) {
+            initialItems = [initialItems];
+        }
+
+        for (const item of initialItems) {
+            this.push(item);
+            console.log(`[QUEUE] Initial item detected: ${JSON.stringify(item)}`);
+        }
     }
 
     push(params: ConverterParams, attempt = 0) {
