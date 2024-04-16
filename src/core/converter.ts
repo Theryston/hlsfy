@@ -276,7 +276,7 @@ async function srtToVtt(subtitlePath: string, baseFolder: string): Promise<strin
 
 function timeSrtToVtt(time: string) {
     const [hours, minutes, last] = time.split(':');
-    const [seconds, milliseconds] = last.split(',');
+    const [seconds, milliseconds] = (last || '0,0').split(',');
     const numHours = Number(hours || '0');
     const numMinutes = Number(minutes || '0');
     const numSeconds = Number(seconds || '0');
