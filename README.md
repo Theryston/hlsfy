@@ -89,7 +89,8 @@ passing the following body:
     "accessKeyId": "YOUR-ACCESS-KEY-ID", // (required) the access key id
     "secretAccessKey": "YOUR-SECRET-ACCESS-KEY", // (required) the secret access key,
     "path": "SOME-PATH", // (required) the path to store the video in the bucket
-    "endpoint": "https://s3.us-east-005.backblazeb2.com" // (optional) the endpoint
+    "endpoint": "https://s3.us-east-005.backblazeb2.com", // (optional) the endpoint
+    "acl": "public-read" // (optional) the acl
   },
   "callbackUrl": "https://example.com/callback" // (optional) a POST request will be sent to this url when the process is done
 }

@@ -2,7 +2,7 @@ import { MAX_RETRY, TEMP_DIR } from "../constants.js"
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ObjectCannedACL } from "@aws-sdk/client-s3";
 import ffmpeg from 'fluent-ffmpeg';
 import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
@@ -26,6 +26,7 @@ type S3 = {
     accessKeyId: string
     secretAccessKey: string
     path: string
+    acl?: ObjectCannedACL
     endpoint?: string
 }
 
@@ -496,6 +497,7 @@ async function uploadWorker({ s3, subPath, file, filePath, client, attempts }: {
             Bucket: s3.bucket,
             Key: key,
             Body: fs.readFileSync(filePath),
+            ACL: s3.acl,
         })
         await client.send(command);
         console.log(`[CONVERTER] ${key} was uploaded!`);
