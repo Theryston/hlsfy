@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import cleanTemp from '../clean-temp.js';
 import { spawn } from 'child_process'
+import axios from 'axios';
 
 const __dirname = path.dirname(import.meta.url).replace('file://', '');
 
@@ -84,17 +85,43 @@ class Queue {
                     .run('processing', processId);
             }
         })
-            .then(() => {
+            .then(async () => {
                 console.log(`[QUEUE] Success while processing ${params.source} of id ${processId}`);
                 this.db
                     .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
                     .run('done', processId);
+
+                if (params.callbackUrl) {
+                    try {
+                        await axios.post(params.callbackUrl, {
+                            id: processId,
+                            status: 'done',
+                            message: 'Success'
+                        })
+                        console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
+                    } catch (error) {
+                        console.log(`[QUEUE] Failed to send callback: ${error}`);
+                    }
+                }
             })
-            .catch(() => {
+            .catch(async () => {
                 console.error(`[QUEUE] Failed while processing ${params.source} of id ${processId}`);
                 this.db
                     .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
                     .run('failed', processId);
+
+                if (params.callbackUrl) {
+                    try {
+                        await axios.post(params.callbackUrl, {
+                            id: processId,
+                            status: 'failed',
+                            message: 'Failed'
+                        })
+                        console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
+                    } catch (error) {
+                        console.log(`[QUEUE] Failed to send callback: ${error}`);
+                    }
+                }
             })
     }
 

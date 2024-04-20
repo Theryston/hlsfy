@@ -42,6 +42,7 @@ export type ConverterParams = {
     s3: S3
     processId?: number
     onStart?: () => void
+    callbackUrl?: string
 }
 
 async function main() {
