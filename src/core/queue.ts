@@ -7,6 +7,7 @@ import path from 'path';
 import cleanTemp from '../clean-temp.js';
 import { spawn } from 'child_process'
 import axios from 'axios';
+import formatTime from '../utils/format-time.js';
 
 const __dirname = path.dirname(import.meta.url).replace('file://', '');
 
@@ -73,8 +74,9 @@ class Queue {
         }
     }
 
-    push(params: ConverterParams, attempt = 0) {
+    push(params: ConverterParams) {
         const processId = params.processId || this.db.prepare(`INSERT INTO process_queue (status, source) VALUES (?, ?)`).run('pending', params.source).lastInsertRowid;
+        const start = Date.now();
 
         internalQueue.push({
             ...params,
@@ -122,6 +124,10 @@ class Queue {
                         console.log(`[QUEUE] Failed to send callback: ${error}`);
                     }
                 }
+            })
+            .finally(() => {
+                const duration = Date.now() - start;
+                console.log(`[QUEUE] Done processing ${params.source} of id ${processId} in ${formatTime(duration)}`);
             })
     }
 

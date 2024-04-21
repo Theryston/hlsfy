@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
 import decompress from "decompress";
+import formatTime from "../utils/format-time.js";
 
 const ALL_SUBTITLE_EXT = ['.srt', '.vtt', '.webvtt']
 const ALLOWED_TO_CONVERT_SUBTITLE = ['.srt']
@@ -171,18 +172,6 @@ async function runPromises(allPromises: Promise<any>[], onError: (error: any) =>
         console.log(`[CONVERTER] failed in: ${formatTime(Date.now() - start)}`);
         process.exit(1);
     }
-}
-
-function formatTime(ms: number) {
-    let hours = Math.floor(ms / 3600000);
-    let minutes = Math.floor((ms % 3600000) / 60000);
-    let seconds = Math.floor(((ms % 3600000) % 60000) / 1000);
-
-    let hoursStr = hours < 10 ? "0" + hours : hours;
-    let minutesStr = minutes < 10 ? "0" + minutes : minutes;
-    let secondsStr = seconds < 10 ? "0" + seconds : seconds;
-
-    return `${hoursStr}:${minutesStr}:${secondsStr}`
 }
 
 async function convertToVtt(subtitlePath: string, baseFolder: string): Promise<string | null> {
