@@ -98,7 +98,7 @@ class Queue {
                         await axios.post(params.callbackUrl, {
                             id: processId,
                             status: 'done',
-                            message: 'Success'
+                            params
                         })
                         console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
                     } catch (error) {
@@ -117,7 +117,7 @@ class Queue {
                         await axios.post(params.callbackUrl, {
                             id: processId,
                             status: 'failed',
-                            message: 'Failed'
+                            params
                         })
                         console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
                     } catch (error) {
