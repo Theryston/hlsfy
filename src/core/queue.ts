@@ -129,6 +129,8 @@ class Queue {
                 const duration = Date.now() - start;
                 console.log(`[QUEUE] Done processing ${params.source} of id ${processId} in ${formatTime(duration)}`);
             })
+
+        return this.getProcess(processId);
     }
 
     hasPending() {
