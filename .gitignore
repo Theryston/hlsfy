@@ -3,3 +3,4 @@ db
 dist
 tmp
 .env
+.pnpm-store
