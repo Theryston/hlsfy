@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "rm -rf db && mkdir db && nodemon -L -e ts --watch src --ext ts --exec 'pnpm run build && pnpm run start'",
     "start": "node dist/index.js",
-    "build": "tsc -p ."
+    "build": "tsc -p .",
+    "format": "prettier --write \"./**/*.{js,jsx,mjs,cjs,ts,tsx,json}\""
   },
   "keywords": [],
   "author": "Theryston Santos",
@@ -22,6 +23,7 @@
     "@types/fluent-ffmpeg": "^2.1.24",
     "@types/node-cron": "^3.0.11",
     "nodemon": "^3.1.4",
+    "prettier": "^3.3.3",
     "typescript": "^5.5.2"
   },
   "dependencies": {
