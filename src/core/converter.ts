@@ -88,11 +88,13 @@ async function converter({
   const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
 
   const sourceInfos = await getVideoInfos(sourcePath);
+
   const videoTracks = sourceInfos.streams.filter(
-    (stream) => stream.codec_type === "video",
+    (stream) => stream.codec_type === "video" && stream.codec_name !== "mjpeg"
   );
+
   const audioTracks = sourceInfos.streams.filter(
-    (stream) => stream.codec_type === "audio",
+    (stream) => stream.codec_type === "audio"
   );
 
   if (!videoTracks.length) {
@@ -100,10 +102,11 @@ async function converter({
   }
 
   const videoTrack = videoTracks.sort(
-    (a, b) => (b.height || 0) - (a.height || 0),
+    (a, b) => (b.height || 0) - (a.height || 0)
   )[0];
+
   const filteredQualities = qualities.filter(
-    (quality) => quality.height <= (videoTrack.height || 0),
+    (quality) => quality.height <= (videoTrack.height || 0)
   );
 
   if (!filteredQualities.length) {
@@ -124,7 +127,7 @@ async function converter({
           path: audioPath,
           lang: audioTrack.tags?.language || "und",
         });
-      })(),
+      })()
     );
   }
 
@@ -136,7 +139,7 @@ async function converter({
         const ext = path.extname(subtitle.url).split("?")[0] || ".vtt";
         let subtitlePath: string | null = path.join(
           subtitleFolder,
-          `${subtitle.language}${ext}`,
+          `${subtitle.language}${ext}`
         );
         await downloadFile(subtitle.url, subtitlePath);
 
@@ -154,7 +157,7 @@ async function converter({
           path: subtitlePath,
           language: subtitle.language,
         });
-      })(),
+      })()
     );
   }
 
@@ -174,7 +177,7 @@ async function converter({
           height: quality.height,
           bitrate: quality.bitrate,
         });
-      })(),
+      })()
     );
   }
 
@@ -196,13 +199,13 @@ function deleteFolder(path: string) {
 
 async function runPromises(
   allPromises: Promise<any>[],
-  onError: (error: any) => void,
+  onError: (error: any) => void
 ) {
   const start = Date.now();
   try {
     await Promise.all(allPromises);
     console.log(
-      `[CONVERTER] all promises processed in: ${formatTime(Date.now() - start)}`,
+      `[CONVERTER] all promises processed in: ${formatTime(Date.now() - start)}`
     );
   } catch (error) {
     console.error(error);
@@ -218,7 +221,7 @@ async function runPromises(
 
 async function convertToVtt(
   subtitlePath: string,
-  baseFolder: string,
+  baseFolder: string
 ): Promise<string | null> {
   const originalExt = path.extname(subtitlePath).split("?")[0] || ".vtt";
 
@@ -236,9 +239,7 @@ async function convertToVtt(
     const unCompressedFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
     const files = await extractArchive(subtitlePath, unCompressedFolder);
     const subtitleFile = files.find((file) =>
-      ALL_SUBTITLE_EXT.includes(
-        path.extname(file.path).split("?")[0] || ".vtt",
-      ),
+      ALL_SUBTITLE_EXT.includes(path.extname(file.path).split("?")[0] || ".vtt")
     );
 
     if (!subtitleFile) {
@@ -281,7 +282,7 @@ async function convertToVtt(
 
 async function srtToVtt(
   subtitlePath: string,
-  baseFolder: string,
+  baseFolder: string
 ): Promise<string | null> {
   const srt = fs.readFileSync(subtitlePath, "utf8");
   const srtLines = srt.split("\n");
@@ -419,15 +420,15 @@ async function hlsFy({
   const defaultLang = defaultAudio?.lang;
   const audiosStr = hlsAudioPaths.map(
     (audio) =>
-      `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`,
+      `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`
   );
   const subtitlesStr = hlsSubtitlesPaths.map(
     (subtitle) =>
-      `in=${subtitle.in},stream=text,segment_template=${subtitle.folder}/$Number$.webvtt,playlist_name=${subtitle.m3u8},hls_group_id=text,hls_name=${new Intl.Locale(subtitle.language).language}`,
+      `in=${subtitle.in},stream=text,segment_template=${subtitle.folder}/$Number$.webvtt,playlist_name=${subtitle.m3u8},hls_group_id=text,hls_name=${new Intl.Locale(subtitle.language).language}`
   );
   const videosStr = hlsVideoPaths.map(
     (video) =>
-      `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`,
+      `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`
   );
 
   const args = [
@@ -489,7 +490,7 @@ async function convertVideo({
       .size(`?x${quality.height}`)
       .on("progress", (progress) => {
         console.log(
-          `[CONVERTER|${quality.height}] ${sourcePath} - ${progress.percent || 0}% converted...`,
+          `[CONVERTER|${quality.height}] ${sourcePath} - ${progress.percent || 0}% converted...`
         );
       })
       .on("end", () => {
@@ -498,7 +499,7 @@ async function convertVideo({
       .on("error", async (err) => {
         if (attempts < MAX_RETRY) {
           console.log(
-            `[CONVERTER|${quality.height}] ${sourcePath} - ${err.message} - retrying...`,
+            `[CONVERTER|${quality.height}] ${sourcePath} - ${err.message} - retrying...`
           );
           resolve(
             await convertVideo({
@@ -507,7 +508,7 @@ async function convertVideo({
               baseFolder,
               quality,
               attempts: attempts + 1,
-            }),
+            })
           );
         } else {
           reject(err);
@@ -553,7 +554,7 @@ async function extractAudioTrack({
       .output(audioPath)
       .on("progress", (progress) => {
         console.log(
-          `[CONVERTER|${audioTrack.tags.language || "und"}] ${sourcePath} - ${progress.percent || 0}% audio extracted...`,
+          `[CONVERTER|${audioTrack.tags.language || "und"}] ${sourcePath} - ${progress.percent || 0}% audio extracted...`
         );
       })
       .on("end", () => {
@@ -562,7 +563,7 @@ async function extractAudioTrack({
       .on("error", async (err) => {
         if (attempts < MAX_RETRY) {
           console.log(
-            `[CONVERTER|${audioTrack.tags.language || "und"}] ${sourcePath} - ${err.message} - retrying...`,
+            `[CONVERTER|${audioTrack.tags.language || "und"}] ${sourcePath} - ${err.message} - retrying...`
           );
           resolve(
             await extractAudioTrack({
@@ -570,7 +571,7 @@ async function extractAudioTrack({
               audioTrack,
               baseFolder,
               attempts: attempts + 1,
-            }),
+            })
           );
         } else {
           reject(err);
@@ -675,7 +676,7 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string) {
     await uploadQueue.drained();
 
     console.log(
-      `[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}${subPath ? `/${subPath}` : ""}`,
+      `[CONVERTER] ${folderPath} uploaded to s3://${s3.bucket}/${s3.path}${subPath ? `/${subPath}` : ""}`
     );
   } catch (error) {
     throw error;
@@ -706,7 +707,7 @@ async function downloadWorker({
     responseType: "stream",
     onDownloadProgress: (progress) => {
       const percent = Math.floor(
-        (progress.loaded / (progress.total || 1)) * 100,
+        (progress.loaded / (progress.total || 1)) * 100
       );
       console.log(`[CONVERTER] ${percent}% from ${url} downloaded...`);
     },
