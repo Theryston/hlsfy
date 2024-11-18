@@ -16,6 +16,7 @@ import formatTime from "../utils/format-time.js";
 
 const ALL_SUBTITLE_EXT = [".srt", ".vtt", ".webvtt"];
 const ALLOWED_TO_CONVERT_SUBTITLE = [".srt"];
+const THUMBNAIL_INTERVAL_SECONDS = 5;
 
 const downloadQueue = fastq(downloadWorker, 5);
 const uploadQueue = fastq(uploadWorker, 50);
@@ -184,9 +185,55 @@ async function converter({
   const allPromises = [...audioPromises, ...subtitlePromises, ...videoPromises];
   await runPromises(allPromises, () => deleteFolder(baseFolder));
 
+  const thumbnailsFolder = fs.mkdtempSync(path.join(baseFolder, "_thumbnails"));
+  const thumbnailsPath = path.join(thumbnailsFolder, "thumbnails_%03d.jpg");
+  await extractThumbnails(
+    sourcePath,
+    thumbnailsPath,
+    THUMBNAIL_INTERVAL_SECONDS
+  );
+
+  const thumbnails = fs
+    .readdirSync(thumbnailsFolder)
+    .filter((file) => file.endsWith(".jpg"))
+    .map((file) => path.join(thumbnailsFolder, file));
+
+  const thumbnailUrls: string[] = [];
+  for (const thumbnail of thumbnails) {
+    const fileName = path.basename(thumbnail);
+
+    thumbnailUrls.push(thumbnail);
+    uploadQueue.push({
+      s3,
+      subPath: "thumbnails",
+      file: fileName,
+      filePath: thumbnail,
+      client: new S3Client({
+        region: s3.region,
+        endpoint: s3.endpoint,
+        credentials: {
+          accessKeyId: s3.accessKeyId,
+          secretAccessKey: s3.secretAccessKey,
+        },
+      }),
+    });
+  }
+
+  await uploadQueue.drained();
+  console.log(
+    `[CONVERTER] Thumbnails uploaded to s3://${s3.bucket}/${s3.path}/thumbnails`
+  );
+
   const hlsFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
-  await hlsFy({ videos, audios, hlsFolder, defaultAudioLang, subtitles });
-  console.log("[CONVERTER] HLS files created");
+  await hlsFy({
+    videos,
+    audios,
+    hlsFolder,
+    defaultAudioLang,
+    subtitles,
+    thumbnails: thumbnailUrls,
+  });
+  console.log("[CONVERTER] HLS files created with thumbnails");
 
   await uploadFolder(hlsFolder, s3);
   deleteFolder(baseFolder);
@@ -336,7 +383,14 @@ function timeSrtToVtt(time: string) {
   const numMinutes = Number(minutes || "0");
   const numSeconds = Number(seconds || "0");
   const numMilliseconds = Number(milliseconds || "0");
-  const strTime = `${numHours.toString().padStart(2, "0")}:${numMinutes.toString().padStart(2, "0")}:${numSeconds.toString().padStart(2, "0")}.${numMilliseconds.toString().padStart(3, "0")}`;
+  const strTime = `${numHours.toString().padStart(2, "0")}:${numMinutes
+    .toString()
+    .padStart(
+      2,
+      "0"
+    )}:${numSeconds.toString().padStart(2, "0")}.${numMilliseconds
+    .toString()
+    .padStart(3, "0")}`;
   return strTime;
 }
 
@@ -351,12 +405,14 @@ async function hlsFy({
   hlsFolder,
   defaultAudioLang,
   subtitles,
+  thumbnails,
 }: {
   videos: { path: string; height: number; bitrate: number }[];
   audios: { path: string; lang: string }[];
   hlsFolder: string;
   defaultAudioLang: string;
   subtitles: { path: string; language: string }[];
+  thumbnails: string[];
 }) {
   const hlsAudioPaths = audios.map((audio, i) => {
     let folder = path.join(hlsFolder, audio.lang);
@@ -431,13 +487,15 @@ async function hlsFy({
       `in=${video.in},stream=video,segment_template=${video.folder}/$Number$.ts,playlist_name=${video.m3u8},hls_group_id=video`
   );
 
+  const masterPlaylistPath = path.join(hlsFolder, "playlist.m3u8");
+
   const args = [
     ...audiosStr,
     ...videosStr,
     ...subtitlesStr,
     ...(defaultLang ? ["--default_language", defaultLang] : ""),
     "--hls_master_playlist_output",
-    path.join(hlsFolder, "playlist.m3u8"),
+    masterPlaylistPath,
   ];
 
   console.log("[CONVERTER] Creating HLS file with args:", args.join(" "));
@@ -447,10 +505,46 @@ async function hlsFy({
       if (code === 0) {
         resolve();
       } else {
-        reject();
+        reject(new Error(`Packager exited with code ${code}`));
       }
     });
   });
+
+  const thumbnailsOutputFolder = path.join(hlsFolder, "thumbnails");
+  fs.mkdirSync(thumbnailsOutputFolder, { recursive: true });
+
+  for (const thumbnailPath of thumbnails) {
+    const fileName = path.basename(thumbnailPath);
+    const destPath = path.join(thumbnailsOutputFolder, fileName);
+    fs.copyFileSync(thumbnailPath, destPath);
+  }
+
+  generateThumbnailsPlaylist(thumbnailsOutputFolder);
+
+  let masterPlaylist = fs.readFileSync(masterPlaylistPath, "utf8");
+
+  masterPlaylist += `\n#EXT-X-THUMBNAILS:uri=thumbnails/thumbnails.m3u8\n`;
+
+  fs.writeFileSync(masterPlaylistPath, masterPlaylist);
+
+  console.log("[CONVERTER] Thumbnails foram adicionadas ao fluxo HLS.");
+}
+
+function generateThumbnailsPlaylist(thumbnailsFolder: string) {
+  const thumbnailsPlaylistPath = path.join(thumbnailsFolder, "thumbnails.m3u8");
+  const files = fs
+    .readdirSync(thumbnailsFolder)
+    .filter((file) => file.endsWith(".jpg") || file.endsWith(".png"));
+
+  let playlistContent = "#EXTM3U\n#EXT-X-VERSION:3\n";
+
+  const thumbnailDuration = THUMBNAIL_INTERVAL_SECONDS;
+
+  for (const file of files) {
+    playlistContent += `#EXTINF:${thumbnailDuration},\nthumbnails/${file}\n`;
+  }
+
+  fs.writeFileSync(thumbnailsPlaylistPath, playlistContent, "utf8");
 }
 
 async function convertVideo({
@@ -701,34 +795,115 @@ async function downloadWorker({
   }
 
   const writer = fs.createWriteStream(path);
-  const response = await axios({
-    url,
-    method: "GET",
-    responseType: "stream",
-    onDownloadProgress: (progress) => {
-      const percent = Math.floor(
-        (progress.loaded / (progress.total || 1)) * 100
-      );
-      console.log(`[CONVERTER] ${percent}% from ${url} downloaded...`);
-    },
-  });
-
-  response.data.pipe(writer);
-
-  await new Promise((resolve, reject) => {
-    writer.on("finish", () => {
-      writer.close();
-      resolve(true);
+  try {
+    const response = await axios({
+      url,
+      method: "GET",
+      responseType: "stream",
     });
 
-    writer.on("error", async (error) => {
-      if (attempts < MAX_RETRY) {
-        console.log(`[CONVERTER] ${url} download failed... retrying...`);
-        return await downloadWorker({ url, path, attempts: attempts + 1 });
+    response.data.pipe(writer);
+
+    await new Promise<void>((resolve, reject) => {
+      writer.on("finish", () => {
+        writer.close();
+        resolve();
+      });
+
+      writer.on("error", async (error) => {
+        if (attempts < MAX_RETRY) {
+          console.log(`[CONVERTER] ${url} download failed... retrying...`);
+          return await downloadWorker({ url, path, attempts: attempts + 1 });
+        }
+
+        console.log(`[CONVERTER] ${url} download failed...`, error);
+        reject(error);
+      });
+    });
+  } catch (error: any) {
+    if (attempts < MAX_RETRY) {
+      console.log(`[CONVERTER] ${url} download failed... retrying...`);
+      await downloadWorker({ url, path, attempts: attempts + 1 });
+    } else {
+      console.log(`[CONVERTER] ${url} download failed...`, error);
+      throw error;
+    }
+  }
+}
+
+async function extractThumbnails(
+  videoPath: string,
+  outputPattern: string,
+  intervalSeconds: number
+): Promise<void> {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const timemarks = await generateTimemarks(videoPath, intervalSeconds);
+      console.log("[CONVERTER] Timemarks:", timemarks);
+
+      if (timemarks.length === 0) {
+        throw new Error("No timemarks generated for thumbnail extraction.");
       }
 
-      console.log(`[CONVERTER] ${url} download failed...`, error);
-      reject(false);
-    });
+      const filenamePattern =
+        path.basename(outputPattern, path.extname(outputPattern)) +
+        "%03d" +
+        path.extname(outputPattern);
+
+      ffmpeg(videoPath)
+        .on("end", () => {
+          console.log("[CONVERTER] Thumbnails extraction completed.");
+          resolve();
+        })
+        .on("error", (err) => {
+          console.error(
+            "[CONVERTER] Failed to extract thumbnails:",
+            err.message
+          );
+          reject(err);
+        })
+        .screenshots({
+          count: timemarks.length,
+          timemarks,
+          filename: filenamePattern,
+          folder: path.dirname(outputPattern),
+          size: "320x240",
+        });
+    } catch (err) {
+      console.error("[CONVERTER] Error during thumbnails extraction:", err);
+      reject(err);
+    }
   });
+}
+
+async function generateTimemarks(
+  videoPath: string,
+  intervalSeconds: number
+): Promise<string[]> {
+  const duration = await getVideoDuration(videoPath);
+  const timemarks: string[] = [formatTimeSeconds(0)];
+
+  for (let i = intervalSeconds; i < duration; i += intervalSeconds) {
+    timemarks.push(formatTimeSeconds(i));
+  }
+
+  return timemarks;
+}
+
+async function getVideoDuration(videoPath: string): Promise<number> {
+  const metadata = await getVideoInfos(videoPath);
+  return metadata.format.duration || 0;
+}
+
+function formatTimeSeconds(seconds: number): string {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = (seconds % 60).toFixed(3);
+  return `${padZero(hrs)}:${padZero(mins)}:${padZero(secs)}`;
+}
+
+function padZero(num: number | string, size: number = 2): string {
+  let s = num.toString();
+  while (s.length < size) s = "0" + s;
+  return s;
 }
