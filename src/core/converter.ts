@@ -532,9 +532,17 @@ async function hlsFy({
 
 function generateThumbnailsPlaylist(thumbnailsFolder: string) {
   const thumbnailsPlaylistPath = path.join(thumbnailsFolder, "thumbnails.m3u8");
+
   const files = fs
     .readdirSync(thumbnailsFolder)
-    .filter((file) => file.endsWith(".jpg") || file.endsWith(".png"));
+    .filter((file) => file.endsWith(".jpg") || file.endsWith(".png"))
+    .sort((a, b) => {
+      const aMatch = a.match(/_(\d+)\.jpg$/);
+      const bMatch = b.match(/_(\d+)\.jpg$/);
+      const aNum = aMatch ? parseInt(aMatch[1], 10) : 0;
+      const bNum = bMatch ? parseInt(bMatch[1], 10) : 0;
+      return aNum - bNum;
+    });
 
   let playlistContent = "#EXTM3U\n#EXT-X-VERSION:3\n";
 
