@@ -215,6 +215,7 @@ async function converter({
           accessKeyId: s3.accessKeyId,
           secretAccessKey: s3.secretAccessKey,
         },
+        forcePathStyle: true,
       }),
     });
   }
@@ -761,6 +762,7 @@ async function uploadFolder(folderPath: string, s3: S3, subPath?: string) {
         accessKeyId: s3.accessKeyId,
         secretAccessKey: s3.secretAccessKey,
       },
+      forcePathStyle: true,
     });
 
     const files = fs.readdirSync(folderPath);
