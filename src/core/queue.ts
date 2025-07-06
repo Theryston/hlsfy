@@ -14,12 +14,20 @@ const __dirname = path.dirname(import.meta.url).replace("file://", "");
 async function worker(params: ConverterParams) {
   const tempParamsFolder = fs.mkdtempSync(path.join(TEMP_DIR, "_"));
   const paramsFile = path.join(tempParamsFolder, "params.json");
+  const outputMetadataFile = path.join(
+    tempParamsFolder,
+    "output-metadata.json"
+  );
   fs.writeFileSync(paramsFile, JSON.stringify(params));
 
   const converterPath = path.join(__dirname, "converter.js");
   console.log(`[QUEUE] Running ${converterPath}...`);
 
-  const childProcess = spawn("node", [converterPath, paramsFile]);
+  const childProcess = spawn("node", [
+    converterPath,
+    paramsFile,
+    outputMetadataFile,
+  ]);
 
   childProcess.stdout.on("data", (data) => {
     process.stdout.write(data);
@@ -28,6 +36,8 @@ async function worker(params: ConverterParams) {
   childProcess.stderr.on("data", (data) => {
     process.stderr.write(data);
   });
+
+  let outputMetadata: any;
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -40,9 +50,13 @@ async function worker(params: ConverterParams) {
         }
       });
     });
+
+    outputMetadata = JSON.parse(fs.readFileSync(outputMetadataFile, "utf8"));
   } finally {
     fs.rmSync(tempParamsFolder, { recursive: true, force: true });
   }
+
+  return outputMetadata || null;
 }
 
 const internalQueue = fastq(worker, CONCURRENCY);
@@ -52,11 +66,11 @@ class Queue {
 
   constructor() {
     this.db.exec(
-      `CREATE TABLE IF NOT EXISTS process_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, source TEXT)`,
+      `CREATE TABLE IF NOT EXISTS process_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, source TEXT)`
     );
     this.db
       .prepare(
-        `UPDATE process_queue SET status = ? WHERE status = ? OR status = ?`,
+        `UPDATE process_queue SET status = ? WHERE status = ? OR status = ?`
       )
       .run("failed", "pending", "processing");
 
@@ -93,16 +107,17 @@ class Queue {
         ...params,
         onStart: () => {
           console.log(
-            `[QUEUE] Start processing ${params.source} of id ${processId}`,
+            `[QUEUE] Start processing ${params.source} of id ${processId}`
           );
           this.db
             .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
             .run("processing", processId);
         },
       })
-      .then(async () => {
+      .then(async (outputMetadata) => {
+        console.log("outputMetadata", outputMetadata);
         console.log(
-          `[QUEUE] Success while processing ${params.source} of id ${processId}`,
+          `[QUEUE] Success while processing ${params.source} of id ${processId}`
         );
         this.db
           .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
@@ -113,6 +128,7 @@ class Queue {
             await axios.post(params.callbackUrl, {
               id: processId,
               status: "done",
+              sourceDuration: outputMetadata?.sourceDuration || null,
               params,
             });
             console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
@@ -123,7 +139,7 @@ class Queue {
       })
       .catch(async () => {
         console.error(
-          `[QUEUE] Failed while processing ${params.source} of id ${processId}`,
+          `[QUEUE] Failed while processing ${params.source} of id ${processId}`
         );
         this.db
           .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
@@ -145,7 +161,7 @@ class Queue {
       .finally(() => {
         const duration = Date.now() - start;
         console.log(
-          `[QUEUE] Done processing ${params.source} of id ${processId} in ${formatTime(duration)}`,
+          `[QUEUE] Done processing ${params.source} of id ${processId} in ${formatTime(duration)}`
         );
       });
 
@@ -170,7 +186,7 @@ class Queue {
   listProcess(limit?: number) {
     const result = this.db
       .prepare(
-        `SELECT * FROM process_queue ORDER BY id DESC${limit ? " LIMIT ?" : ""}`,
+        `SELECT * FROM process_queue ORDER BY id DESC${limit ? " LIMIT ?" : ""}`
       )
       .all(limit);
 

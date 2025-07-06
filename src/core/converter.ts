@@ -54,15 +54,17 @@ export type ConverterParams = {
 
 async function main() {
   const fileParams = process.argv[2];
+  const fileOutputMetadata = process.argv[3];
 
-  if (!fileParams) {
-    return;
-  }
+  if (!fileParams) return;
+  if (!fileOutputMetadata) return;
 
   const paramsString = fs.readFileSync(fileParams, "utf8");
   const params: ConverterParams = JSON.parse(paramsString);
 
-  await converter(params);
+  const result = await converter(params);
+
+  fs.writeFileSync(fileOutputMetadata, JSON.stringify(result));
 }
 
 main();
@@ -86,6 +88,8 @@ async function converter({
   const sourceType = await getFileType(sourceRawPath);
   const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
   fs.renameSync(sourceRawPath, sourcePath);
+  const sourceDuration = await getVideoDuration(sourcePath);
+
   const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
 
   const sourceInfos = await getVideoInfos(sourcePath);
@@ -238,6 +242,10 @@ async function converter({
 
   await uploadFolder(hlsFolder, s3);
   deleteFolder(baseFolder);
+
+  return {
+    sourceDuration,
+  };
 }
 
 function deleteFolder(path: string) {
