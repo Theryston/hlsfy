@@ -2,4 +2,4 @@ if [ ! -d "db" ]; then
   mkdir db
 fi
 
-pnpm run start
+npm run start
