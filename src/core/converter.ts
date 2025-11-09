@@ -13,6 +13,7 @@ import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
 import decompress from "decompress";
 import formatTime from "../utils/format-time.js";
+import slugify from "slugify";
 
 const ALL_SUBTITLE_EXT = [".srt", ".vtt", ".webvtt"];
 const ALLOWED_TO_CONVERT_SUBTITLE = [".srt"];
@@ -118,7 +119,7 @@ async function converter({
     throw new Error("no quality found");
   }
 
-  const audios: { path: string; lang: string }[] = [];
+  const audios: { path: string; lang: string; title?: string }[] = [];
   const audioPromises = [];
   for (const audioTrack of audioTracks) {
     audioPromises.push(
@@ -131,6 +132,7 @@ async function converter({
         audios.push({
           path: audioPath,
           lang: audioTrack.tags?.language || "und",
+          title: audioTrack.tags?.title,
         });
       })()
     );
@@ -417,17 +419,20 @@ async function hlsFy({
   thumbnails,
 }: {
   videos: { path: string; height: number; bitrate: number }[];
-  audios: { path: string; lang: string }[];
+  audios: { path: string; lang: string; title?: string }[];
   hlsFolder: string;
   defaultAudioLang: string;
   subtitles: { path: string; language: string }[];
   thumbnails: string[];
 }) {
   const hlsAudioPaths = audios.map((audio, i) => {
-    let folder = path.join(hlsFolder, audio.lang);
+    const titleSlug =
+      slugify.default?.(audio.title || audio.lang, { lower: true }) ||
+      audio.lang;
+    let folder = path.join(hlsFolder, titleSlug);
 
     if (fs.existsSync(folder)) {
-      folder = path.join(hlsFolder, `${i}-${audio.lang}`);
+      folder = path.join(hlsFolder, `${i}-${titleSlug}`);
     } else {
       fs.mkdirSync(folder, { recursive: true });
     }
@@ -436,6 +441,7 @@ async function hlsFy({
       m3u8: path.join(folder, "audio.m3u8"),
       folder,
       in: audio.path,
+      title: audio.title,
     };
   });
   const hlsVideoPaths = videos.map((video, i) => {
@@ -485,7 +491,7 @@ async function hlsFy({
   const defaultLang = defaultAudio?.lang;
   const audiosStr = hlsAudioPaths.map(
     (audio) =>
-      `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio`
+      `in=${audio.in},stream=audio,segment_template=${audio.folder}/$Number$.ts,playlist_name=${audio.m3u8},hls_group_id=audio${audio.title ? `,hls_name=${audio.title}` : ""}`
   );
   const subtitlesStr = hlsSubtitlesPaths.map(
     (subtitle) =>
@@ -733,7 +739,7 @@ async function uploadWorker({
     attempts = 0;
   }
 
-  const key = path.join(s3.path, subPath || "", file);
+  const key = path.join(s3.path, subPath || "", file).replace(/\\/g, "/");
   try {
     console.log(`[CONVERTER] uploading ${key}...`);
     const command = new PutObjectCommand({

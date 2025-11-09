@@ -1,4 +1,4 @@
-FROM node:lts-alpine
+FROM oven/bun:canary-alpine
 
 RUN apk update && apk upgrade
 RUN apk add --no-cache ffmpeg
@@ -11,15 +11,12 @@ COPY ./package.json ./
 COPY ./tsconfig.json ./
 COPY ./start.sh ./
 
-RUN npm install
-RUN npm run build
-RUN npm prune --production
-RUN rm -rf ./src
-
 ENV NODE_ENV=production
+
+RUN bun install
 
 EXPOSE 3000
 
-RUN chmod +x ./start.sh
+RUN sed -i 's/\r$//' ./start.sh && chmod +x ./start.sh
 
-CMD ["./start.sh"] 
+CMD ["/app/start.sh"]

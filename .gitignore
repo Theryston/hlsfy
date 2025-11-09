@@ -4,3 +4,4 @@ dist
 tmp
 .env
 .pnpm-store
+testing.json

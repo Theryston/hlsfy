@@ -1,15 +1,17 @@
 import { promise as fastq } from "fastq";
 import { ConverterParams } from "./converter.js";
 import { CONCURRENCY, TEMP_DIR } from "../constants.js";
-import betterSqlite3 from "better-sqlite3";
+import { Database } from "bun:sqlite";
 import fs from "fs";
 import path from "path";
 import cleanTemp from "../clean-temp.js";
 import { spawn } from "child_process";
 import axios from "axios";
 import formatTime from "../utils/format-time.js";
+import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(import.meta.url).replace("file://", "");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function worker(params: ConverterParams) {
   const tempParamsFolder = fs.mkdtempSync(path.join(TEMP_DIR, "_"));
@@ -18,33 +20,28 @@ async function worker(params: ConverterParams) {
     tempParamsFolder,
     "output-metadata.json"
   );
+
   fs.writeFileSync(paramsFile, JSON.stringify(params));
 
-  const converterPath = path.join(__dirname, "converter.js");
+  const converterPath = path.join(__dirname, "converter.ts");
   console.log(`[QUEUE] Running ${converterPath}...`);
 
-  const childProcess = spawn("node", [
+  const childProcess = spawn("bun", [
     converterPath,
     paramsFile,
     outputMetadataFile,
   ]);
 
-  childProcess.stdout.on("data", (data) => {
-    process.stdout.write(data);
-  });
-
-  childProcess.stderr.on("data", (data) => {
-    process.stderr.write(data);
-  });
+  childProcess.stdout.on("data", (data) => process.stdout.write(data));
+  childProcess.stderr.on("data", (data) => process.stderr.write(data));
 
   let outputMetadata: any;
 
   try {
     await new Promise<void>((resolve, reject) => {
       childProcess.on("exit", (code) => {
-        if (code === 0) {
-          resolve();
-        } else {
+        if (code === 0) resolve();
+        else {
           console.log(`[QUEUE] ${converterPath} exited with code ${code}`);
           reject("exit");
         }
@@ -62,17 +59,30 @@ async function worker(params: ConverterParams) {
 const internalQueue = fastq(worker, CONCURRENCY);
 
 class Queue {
-  db = betterSqlite3("db/queue.sqlite", { verbose: console.log });
+  db: Database;
 
   constructor() {
-    this.db.exec(
-      `CREATE TABLE IF NOT EXISTS process_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, source TEXT)`
-    );
-    this.db
-      .prepare(
-        `UPDATE process_queue SET status = ? WHERE status = ? OR status = ?`
+    const dbDir = path.resolve("db");
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    const dbPath = path.join(dbDir, "queue.sqlite");
+    this.db = new Database(dbPath);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS process_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        status TEXT,
+        source TEXT
       )
-      .run("failed", "pending", "processing");
+    `);
+
+    this.db.run(`
+      UPDATE process_queue
+      SET status = 'failed'
+      WHERE status IN ('pending', 'processing')
+    `);
 
     if (fs.existsSync(TEMP_DIR)) {
       cleanTemp();
@@ -83,10 +93,7 @@ class Queue {
     console.log(`[QUEUE] Queue initialized with concurrency ${CONCURRENCY}`);
 
     let initialItems = JSON.parse(process.env.INITIAL_ITEMS || "[]");
-
-    if (!Array.isArray(initialItems)) {
-      initialItems = [initialItems];
-    }
+    if (!Array.isArray(initialItems)) initialItems = [initialItems];
 
     for (const item of initialItems) {
       this.push(item);
@@ -95,11 +102,14 @@ class Queue {
   }
 
   push(params: ConverterParams) {
+    const insertStmt = this.db.query(
+      `INSERT INTO process_queue (status, source) VALUES (?, ?)`
+    );
+
     const processId =
       params.processId ||
-      this.db
-        .prepare(`INSERT INTO process_queue (status, source) VALUES (?, ?)`)
-        .run("pending", params.source).lastInsertRowid;
+      insertStmt.run("pending", params.source).lastInsertRowId;
+
     const start = Date.now();
 
     internalQueue
@@ -110,7 +120,7 @@ class Queue {
             `[QUEUE] Start processing ${params.source} of id ${processId}`
           );
           this.db
-            .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
+            .query(`UPDATE process_queue SET status = ? WHERE id = ?`)
             .run("processing", processId);
         },
       })
@@ -119,8 +129,9 @@ class Queue {
         console.log(
           `[QUEUE] Success while processing ${params.source} of id ${processId}`
         );
+
         this.db
-          .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
+          .query(`UPDATE process_queue SET status = ? WHERE id = ?`)
           .run("done", processId);
 
         if (params.callbackUrl) {
@@ -141,8 +152,9 @@ class Queue {
         console.error(
           `[QUEUE] Failed while processing ${params.source} of id ${processId}`
         );
+
         this.db
-          .prepare(`UPDATE process_queue SET status = ? WHERE id = ?`)
+          .query(`UPDATE process_queue SET status = ? WHERE id = ?`)
           .run("failed", processId);
 
         if (params.callbackUrl) {
@@ -169,28 +181,21 @@ class Queue {
   }
 
   hasPending() {
-    const result = this.db
-      .prepare(`SELECT * FROM process_queue WHERE status = ? OR status = ?`)
+    const rows = this.db
+      .query(`SELECT * FROM process_queue WHERE status IN (?, ?)`)
       .all("pending", "processing");
-
-    return result.length > 0;
+    return rows.length > 0;
   }
 
   getProcess(id: number | bigint) {
-    const result = this.db
-      .prepare(`SELECT * FROM process_queue WHERE id = ?`)
-      .get(id);
-    return result;
+    return this.db.query(`SELECT * FROM process_queue WHERE id = ?`).get(id);
   }
 
   listProcess(limit?: number) {
-    const result = this.db
-      .prepare(
-        `SELECT * FROM process_queue ORDER BY id DESC${limit ? " LIMIT ?" : ""}`
-      )
-      .all(limit);
-
-    return result;
+    const sql = `SELECT * FROM process_queue ORDER BY id DESC ${
+      limit ? `LIMIT ${limit}` : ""
+    }`;
+    return this.db.query(sql).all();
   }
 }
 

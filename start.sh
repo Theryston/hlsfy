@@ -1,5 +1,6 @@
+#!/bin/sh
 if [ ! -d "db" ]; then
   mkdir db
 fi
 
-npm run start
+bun run start
