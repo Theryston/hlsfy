@@ -108,7 +108,7 @@ class Queue {
 
     const processId =
       params.processId ||
-      insertStmt.run("pending", params.source).lastInsertRowId;
+      insertStmt.run("pending", params.source).lastInsertRowid;
 
     const start = Date.now();
 
