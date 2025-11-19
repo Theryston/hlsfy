@@ -387,7 +387,15 @@ async function convertToVtt(
   const sourceExt = path.extname(subtitlePath).split("?")[0] || ".vtt";
 
   if ([".vtt", ".webvtt"].includes(sourceExt)) {
-    fs.copyFileSync(subtitlePath, vttFilePath);
+    const raw = fs.readFileSync(subtitlePath, "utf8");
+    const hasHeader = raw.trimStart().toUpperCase().startsWith("WEBVTT");
+    const hasCommaTimes =
+      /\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(raw);
+
+    if (hasCommaTimes) return await srtToVtt(subtitlePath, baseFolder);
+
+    const output = hasHeader ? raw : `WEBVTT\n\n${raw}`;
+    fs.writeFileSync(vttFilePath, output, "utf8");
     return vttFilePath;
   }
 
