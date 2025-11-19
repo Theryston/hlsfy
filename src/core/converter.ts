@@ -157,9 +157,7 @@ async function converter({
         );
         await downloadFile(subtitle.url, subtitlePath);
 
-        if (![".vtt", ".webvtt"].includes(ext)) {
-          subtitlePath = await convertToVtt(subtitlePath, baseFolder);
-        }
+        subtitlePath = await convertToVtt(subtitlePath, baseFolder);
 
         if (!subtitlePath) {
           console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
