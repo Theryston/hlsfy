@@ -66,13 +66,15 @@ passing the following body:
 {
   "source": "https://example.com/video.mp4", // (required) the url of the original video to be processed
   "defaultAudioLang": "en", // (optional) the default audio language to be added to the HLS
-  "subtitles": [ // (optional) the list of subtitles
+  "subtitles": [
+    // (optional) the list of subtitles
     {
       "url": "https://example.com/subtitles.vtt",
       "language": "en"
     }
   ],
-  "qualities": [ // (required) the list of qualities to be processed
+  "qualities": [
+    // (required) the list of qualities to be processed
     {
       "height": 1080, // (required) the height of the video
       "bitrate": 6500 // (required) the bitrate of the video
@@ -83,7 +85,8 @@ passing the following body:
     }
     // You can add more qualities here
   ],
-  "s3": { // (required) the s3 data to store the processed video
+  "s3": {
+    // (required) the s3 data to store the processed video
     "bucket": "your bucket name", // (required) the bucket name
     "region": "us-east-1", // (required) the region
     "accessKeyId": "YOUR-ACCESS-KEY-ID", // (required) the access key id
@@ -92,6 +95,11 @@ passing the following body:
     "endpoint": "https://s3.us-east-005.backblazeb2.com", // (optional) the endpoint
     "acl": "public-read" // (optional) the acl
   },
+  "extraUploads": [
+    // (optional) upload additional encoded assets besides HLS playlists/segments
+    "ENCODED_AUDIOS", // uploads each extracted audio as /{lang}/encoded_audio.{ext}
+    "ENCODED_VIDEOS" // uploads each encoded video as /{height}/encoded_video.{ext}
+  ],
   "callbackUrl": "https://example.com/callback" // (optional) a POST request will be sent to this url when the process is done
 }
 ```

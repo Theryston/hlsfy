@@ -100,6 +100,24 @@ app.post("/", async (req, res) => {
     }
   }
 
+  if (typeof (params as any).extraUploads !== "undefined") {
+    const extra = (params as any).extraUploads;
+    if (!Array.isArray(extra)) {
+      res.status(400).json({ error: "extraUploads must be an array" });
+      return;
+    }
+    const allowed = new Set(["ENCODED_AUDIOS", "ENCODED_VIDEOS"]);
+    for (const item of extra) {
+      if (typeof item !== "string" || !allowed.has(item)) {
+        res.status(400).json({
+          error:
+            "extraUploads must contain only ENCODED_AUDIOS or ENCODED_VIDEOS",
+        });
+        return;
+      }
+    }
+  }
+
   const process: any = queue.push(params);
   res.status(200).json({ message: "Added to queue", ...process });
 });

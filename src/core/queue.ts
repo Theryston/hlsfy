@@ -124,8 +124,11 @@ class Queue {
             .run("processing", processId);
         },
       })
-      .then(async (outputMetadata) => {
-        console.log("outputMetadata", outputMetadata);
+      .then(async (outputMetadata: any) => {
+        console.log(
+          "[QUEUE] Output metadata",
+          JSON.stringify(outputMetadata, null, 2)
+        );
         console.log(
           `[QUEUE] Success while processing ${params.source} of id ${processId}`
         );
@@ -139,7 +142,7 @@ class Queue {
             await axios.post(params.callbackUrl, {
               id: processId,
               status: "done",
-              sourceDuration: outputMetadata?.sourceDuration || null,
+              ...outputMetadata,
               params,
             });
             console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);

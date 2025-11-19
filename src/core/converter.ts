@@ -48,6 +48,12 @@ export type ConverterParams = {
   subtitles: Subtitle[];
   qualities: Quality[];
   s3: S3;
+  /**
+   * Optional uploads in addition to HLS artifacts.
+   * - ENCODED_AUDIOS: uploads each extracted audio as /{lang}/encoded_audio.{ext}
+   * - ENCODED_VIDEOS: uploads each encoded video as /{height}/encoded_video.{ext}
+   */
+  extraUploads?: ("ENCODED_AUDIOS" | "ENCODED_VIDEOS")[];
   processId?: number;
   onStart?: () => void;
   callbackUrl?: string;
@@ -77,6 +83,7 @@ async function converter({
   onStart,
   defaultAudioLang,
   subtitles: originalSubtitles,
+  extraUploads,
 }: ConverterParams) {
   const baseFolder = fs.mkdtempSync(path.join(TEMP_DIR, "_"));
 
@@ -243,10 +250,78 @@ async function converter({
   console.log("[CONVERTER] HLS files created with thumbnails");
 
   await uploadFolder(hlsFolder, s3);
+
+  // Handle extra uploads when requested
+  const shouldUploadEncodedAudios = Array.isArray(extraUploads)
+    ? extraUploads.includes("ENCODED_AUDIOS")
+    : false;
+  const shouldUploadEncodedVideos = Array.isArray(extraUploads)
+    ? extraUploads.includes("ENCODED_VIDEOS")
+    : false;
+
+  const encodedAudios: { key: string; lang: string; title?: string }[] = [];
+  const encodedVideos: { key: string; height: number; bitrate: number }[] = [];
+
+  if (shouldUploadEncodedAudios || shouldUploadEncodedVideos) {
+    const client = new S3Client({
+      region: s3.region,
+      endpoint: s3.endpoint,
+      credentials: {
+        accessKeyId: s3.accessKeyId,
+        secretAccessKey: s3.secretAccessKey,
+      },
+      forcePathStyle: true,
+    });
+
+    if (shouldUploadEncodedAudios) {
+      for (const audio of audios) {
+        const audioExt = path.extname(audio.path) || ".mp4";
+        const file = `encoded_audio${audioExt}`;
+        const subPath = audio.lang || "und";
+        const key = path.join(s3.path, subPath || "", file).replace(/\\/g, "/");
+        encodedAudios.push({ key, lang: audio.lang, title: audio.title });
+        uploadQueue.push({
+          s3,
+          subPath,
+          file,
+          filePath: audio.path,
+          client,
+        });
+      }
+    }
+
+    if (shouldUploadEncodedVideos) {
+      for (const video of videos) {
+        const videoExt = path.extname(video.path) || ".mp4";
+        const file = `encoded_video${videoExt}`;
+        const subPath = String(video.height);
+        const key = path.join(s3.path, subPath || "", file).replace(/\\/g, "/");
+        encodedVideos.push({
+          key,
+          height: video.height,
+          bitrate: video.bitrate,
+        });
+        uploadQueue.push({
+          s3,
+          subPath,
+          file,
+          filePath: video.path,
+          client,
+        });
+      }
+    }
+
+    await uploadQueue.drained();
+  }
+
   deleteFolder(baseFolder);
 
   return {
     sourceDuration,
+    audioTracks: audios.map((a) => ({ lang: a.lang, title: a.title })),
+    qualities: videos.map((v) => ({ height: v.height, bitrate: v.bitrate })),
+    encodedAudios,
+    encodedVideos,
   };
 }
 
