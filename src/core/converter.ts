@@ -11,12 +11,11 @@ import ffmpeg from "fluent-ffmpeg";
 import { spawn } from "child_process";
 import getShakaPath from "./shaka-packager.js";
 import { promise as fastq } from "fastq";
-import decompress from "decompress";
 import formatTime from "../utils/format-time.js";
 import slugify from "slugify";
+import subsrt from "subsrt-ts";
 
-const ALL_SUBTITLE_EXT = [".srt", ".vtt", ".webvtt"];
-const ALLOWED_TO_CONVERT_SUBTITLE = [".srt"];
+const ALL_SUBTITLE_EXT = ["srt", "vtt", "webvtt"];
 const THUMBNAIL_INTERVAL_SECONDS = 5;
 
 const downloadQueue = fastq(downloadWorker, 5);
@@ -92,6 +91,7 @@ async function converter({
   }
 
   const sourceRawPath = path.join(baseFolder, "source");
+  console.log(`[CONVERTER] downloading source ${source} to ${sourceRawPath}`);
   await downloadFile(source, sourceRawPath);
   const sourceType = await getFileType(sourceRawPath);
   const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
@@ -150,14 +150,7 @@ async function converter({
   for (const subtitle of originalSubtitles) {
     subtitlePromises.push(
       (async () => {
-        const ext = path.extname(subtitle.url).split("?")[0] || ".vtt";
-        let subtitlePath: string | null = path.join(
-          subtitleFolder,
-          `${subtitle.language}${ext}`
-        );
-        await downloadFile(subtitle.url, subtitlePath);
-
-        subtitlePath = await convertToVtt(subtitlePath, baseFolder);
+        const subtitlePath = await downloadSubtitle(subtitle, baseFolder);
 
         if (!subtitlePath) {
           console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
@@ -350,145 +343,41 @@ async function runPromises(
   }
 }
 
-async function convertToVtt(
-  subtitlePath: string,
+async function downloadSubtitle(
+  subtitle: Subtitle,
   baseFolder: string
 ): Promise<string | null> {
-  const originalExt = path.extname(subtitlePath).split("?")[0] || ".vtt";
+  const urlObject = new URL(subtitle.url);
+  const pathname = urlObject.pathname;
+  const ext = pathname.split(".").pop()?.trim().toLowerCase();
 
-  const isCompressedFolder = [
-    ".zip",
-    ".gz",
-    ".tgz",
-    ".tar",
-    ".tar.gz",
-    ".tar.bz2",
-    ".tar.xz",
-  ].includes(originalExt);
+  if (!ext) {
+    console.log(`[CONVERTER] subtitle ${subtitle.url} has no extension`);
+    return null;
+  }
 
-  if (isCompressedFolder) {
-    const unCompressedFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
-    const files = await extractArchive(subtitlePath, unCompressedFolder);
-    const subtitleFile = files.find((file) =>
-      ALL_SUBTITLE_EXT.includes(path.extname(file.path).split("?")[0] || ".vtt")
+  if (!ALL_SUBTITLE_EXT.includes(ext)) {
+    console.log(
+      `[CONVERTER] subtitle ${subtitle.url} has unsupported extension ${ext}`
     );
-
-    if (!subtitleFile) {
-      throw new Error("no subtitle file found");
-    }
-
-    subtitlePath = path.join(unCompressedFolder, subtitleFile.path);
-  }
-
-  const subtitleTempFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
-  const vttFilePath = `${subtitleTempFolder}/subtitle.vtt`;
-  const sourceExt = path.extname(subtitlePath).split("?")[0] || ".vtt";
-
-  if ([".vtt", ".webvtt"].includes(sourceExt)) {
-    const raw = fs.readFileSync(subtitlePath, "utf8");
-    const hasHeader = raw.trimStart().toUpperCase().startsWith("WEBVTT");
-    const hasCommaTimes =
-      /\d{2}:\d{2}:\d{2},\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}/.test(raw);
-
-    if (hasCommaTimes) return await srtToVtt(subtitlePath, baseFolder);
-
-    const output = hasHeader ? raw : `WEBVTT\n\n${raw}`;
-    fs.writeFileSync(vttFilePath, output, "utf8");
-    return vttFilePath;
-  }
-
-  if (!ALLOWED_TO_CONVERT_SUBTITLE.includes(sourceExt)) {
-    console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
     return null;
   }
 
-  const converterSubtitle: Record<
-    string,
-    (subtitlePath: string, baseFolder: string) => Promise<string | null>
-  > = {
-    ".srt": srtToVtt,
-  };
+  const subtitlePath = path.join(baseFolder, `${subtitle.language}.${ext}`);
+  await downloadFile(subtitle.url, subtitlePath);
 
-  const converterFunc = converterSubtitle[sourceExt];
+  const subtitleText = fs.readFileSync(subtitlePath, "utf8");
 
-  if (!converterFunc) {
-    console.log(`[CONVERTER] failed to convert subtitle ${subtitlePath}`);
-    return null;
+  const vtt = subsrt.convert(subtitleText, { format: ext, to: "vtt" });
+
+  const vttPath = path.join(baseFolder, `${subtitle.language}.vtt`);
+
+  if (subtitlePath !== vttPath) {
+    fs.unlinkSync(subtitlePath);
   }
 
-  return await converterFunc(subtitlePath, baseFolder);
-}
-
-async function srtToVtt(
-  subtitlePath: string,
-  baseFolder: string
-): Promise<string | null> {
-  const srt = fs.readFileSync(subtitlePath, "utf8");
-  const srtLines = srt.split("\n");
-
-  if (!srtLines.length) {
-    return null;
-  }
-
-  const parts = [];
-  const blankLine = ["", "\n\n", "\n", "\r\n", "\r", "\t", "\t\t", "\t\t\t"];
-
-  let allLinesPart = [];
-  for (const line of srtLines) {
-    if (blankLine.includes(line)) {
-      parts.push(allLinesPart);
-      allLinesPart = [];
-    } else {
-      allLinesPart.push(line);
-    }
-  }
-
-  let vttStr = "WEBVTT\n\n";
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    const timeIndex = part.findIndex((line) => line.includes(" --> "));
-
-    if (timeIndex < 0) {
-      continue;
-    }
-
-    const id = i + 1;
-    const startAt = part[timeIndex].split(" --> ")[0];
-    const endAt = part[timeIndex].split(" --> ")[1];
-    const vttStartAt = timeSrtToVtt(startAt);
-    const vttEndAt = timeSrtToVtt(endAt);
-    const texts = part.slice(timeIndex + 1);
-    vttStr += `${id}\n${vttStartAt} --> ${vttEndAt}\n${texts.join("\n")}\n\n`;
-  }
-
-  const tempSubtitle = fs.mkdtempSync(path.join(baseFolder, "_"));
-  const vttFilePath = path.join(tempSubtitle, "subtitle.vtt");
-  fs.writeFileSync(vttFilePath, vttStr);
-
-  return vttFilePath;
-}
-
-function timeSrtToVtt(time: string) {
-  const [hours, minutes, last] = time.split(":");
-  const [seconds, milliseconds] = (last || "0,0").split(",");
-  const numHours = Number(hours || "0");
-  const numMinutes = Number(minutes || "0");
-  const numSeconds = Number(seconds || "0");
-  const numMilliseconds = Number(milliseconds || "0");
-  const strTime = `${numHours.toString().padStart(2, "0")}:${numMinutes
-    .toString()
-    .padStart(
-      2,
-      "0"
-    )}:${numSeconds.toString().padStart(2, "0")}.${numMilliseconds
-    .toString()
-    .padStart(3, "0")}`;
-  return strTime;
-}
-
-async function extractArchive(sourcePath: string, tempFolder: string) {
-  const archive = await decompress(sourcePath, tempFolder);
-  return archive;
+  fs.writeFileSync(vttPath, vtt);
+  return vttPath;
 }
 
 async function hlsFy({
@@ -895,9 +784,7 @@ async function downloadWorker({
   path: string;
   attempts?: number;
 }) {
-  if (!attempts) {
-    attempts = 0;
-  }
+  if (!attempts) attempts = 0;
 
   const writer = fs.createWriteStream(path);
   try {
@@ -907,7 +794,28 @@ async function downloadWorker({
       responseType: "stream",
     });
 
+    const fileSize = response.headers["content-length"];
+
     response.data.pipe(writer);
+
+    let percent = 0;
+    let totalBytes = 0;
+    let lastPercent = 0;
+
+    response.data.on("data", (chunk: any) => {
+      if (!fileSize) {
+        console.log(`[CONVERTER] ${url} - got new ${chunk.length} bytes`);
+        return;
+      }
+
+      totalBytes += chunk.length;
+      percent = Math.floor((totalBytes / fileSize) * 100);
+
+      if (percent !== lastPercent) {
+        console.log(`[CONVERTER] ${url} - ${percent.toFixed(2)}% received`);
+        lastPercent = percent;
+      }
+    });
 
     await new Promise<void>((resolve, reject) => {
       writer.on("finish", () => {
