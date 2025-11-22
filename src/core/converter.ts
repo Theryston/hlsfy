@@ -354,6 +354,12 @@ async function runPromises(
     }
 
     console.log(`[CONVERTER] failed in: ${formatTime(Date.now() - start)}`);
+
+    if (process.env.SENTRY_DSN) {
+      Sentry.captureException(error);
+      await Sentry.flush();
+    }
+
     process.exit(1);
   }
 }
