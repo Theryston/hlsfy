@@ -1,3 +1,5 @@
+import "../instrument.js";
+import * as Sentry from "@sentry/node";
 import { MAX_RETRY, TEMP_DIR } from "../constants.js";
 import axios from "axios";
 import fs from "fs";
@@ -65,12 +67,27 @@ async function main() {
   if (!fileParams) return;
   if (!fileOutputMetadata) return;
 
-  const paramsString = fs.readFileSync(fileParams, "utf8");
-  const params: ConverterParams = JSON.parse(paramsString);
+  try {
+    const paramsString = fs.readFileSync(fileParams, "utf8");
+    const params: ConverterParams = JSON.parse(paramsString);
 
-  const result = await converter(params);
+    if (params.source && process.env.SENTRY_DSN) {
+      Sentry.setTag("source", params.source);
+    }
 
-  fs.writeFileSync(fileOutputMetadata, JSON.stringify(result));
+    const result = await converter(params);
+
+    fs.writeFileSync(fileOutputMetadata, JSON.stringify(result));
+  } catch (error) {
+    console.error("error", error);
+
+    if (process.env.SENTRY_DSN) {
+      Sentry.captureException(error);
+      await Sentry.flush();
+    }
+
+    process.exit(1);
+  }
 }
 
 main();
@@ -97,8 +114,6 @@ async function converter({
   const sourcePath = `${sourceRawPath}.${sourceType.ext}`;
   fs.renameSync(sourceRawPath, sourcePath);
   const sourceDuration = await getVideoDuration(sourcePath);
-
-  const subtitleFolder = fs.mkdtempSync(path.join(baseFolder, "_"));
 
   const sourceInfos = await getVideoInfos(sourcePath);
 

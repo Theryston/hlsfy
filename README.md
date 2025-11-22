@@ -6,6 +6,7 @@ transforming any video format into HLS.
 - [Running the API](#running-the-api)
 - [IMPORTANT: API Auto Stop](#important-api-auto-stop)
 - [Concurrency](#concurrency)
+- [Sentry (optional)](#sentry-optional)
 - [Usage](#usage)
 
 ## Running the API
@@ -40,6 +41,16 @@ Just set the environment variable `CONCURRENCY="3"` to limit the number of
 concurrent processes.
 
 The default value is `3`.
+
+## Sentry (optional)
+
+If you provide the `SENTRY_DSN` environment variable, the API will automatically initialize Sentry and send logs and errors to your Sentry project.
+
+Example:
+
+```bash
+docker run -p 3000:3000 -e SENTRY_DSN="YOUR_SENTRY_DSN" theryston/hlsfy
+```
 
 ## Process Status
 

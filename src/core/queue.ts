@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 import axios from "axios";
 import formatTime from "../utils/format-time.js";
 import { fileURLToPath } from "url";
+import * as Sentry from "@sentry/node";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,11 +27,13 @@ async function worker(params: ConverterParams) {
   const converterPath = path.join(__dirname, "converter.ts");
   console.log(`[QUEUE] Running ${converterPath}...`);
 
-  const childProcess = spawn("bun", [
-    converterPath,
-    paramsFile,
-    outputMetadataFile,
-  ]);
+  const childProcess = spawn(
+    "bun",
+    [converterPath, paramsFile, outputMetadataFile],
+    {
+      env: { ...process.env },
+    }
+  );
 
   childProcess.stdout.on("data", (data) => process.stdout.write(data));
   childProcess.stderr.on("data", (data) => process.stderr.write(data));
@@ -147,7 +150,9 @@ class Queue {
             });
             console.log(`[QUEUE] Sent callback: ${params.callbackUrl}`);
           } catch (error) {
-            console.log(`[QUEUE] Failed to send callback: ${error}`);
+            const message = `[QUEUE] Failed to send callback: ${error}`;
+            console.log(message);
+            Sentry.captureException(new Error(message));
           }
         }
       })
